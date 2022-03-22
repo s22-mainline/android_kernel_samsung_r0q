@@ -206,7 +206,6 @@ extern unsigned int sysctl_sched_min_task_util_for_boost;
 extern unsigned int sysctl_sched_min_task_util_for_uclamp;
 /* 0.68ms default for 20ms window size scaled to 1024 */
 extern unsigned int sysctl_sched_min_task_util_for_colocation;
-extern unsigned int __read_mostly sysctl_sched_silver_thres;
 extern unsigned int sysctl_sched_busy_hyst_enable_cpus;
 extern unsigned int sysctl_sched_busy_hyst;
 extern unsigned int sysctl_sched_coloc_busy_hyst_enable_cpus;
@@ -828,6 +827,30 @@ static inline struct walt_related_thread_group
 
 	return rcu_dereference(wts->grp);
 }
+
+#if IS_ENABLED(CONFIG_PERF_RESERVE)
+extern unsigned int proc_perf_reserve;
+
+static inline bool is_task_rgtb_topapp(struct task_struct *p)
+{
+	return sched_get_group_id(p) == DEFAULT_CGROUP_COLOC_ID;
+}
+
+static inline bool task_low_cpu_prio(struct task_struct *p)
+{
+	return (proc_perf_reserve > 0) && (p->prio > proc_perf_reserve);
+}
+
+static inline bool is_task_prio_need_low_cpu(struct task_struct *p)
+{
+	return !is_task_rgtb_topapp(p) && task_low_cpu_prio(p);
+}
+
+static inline bool is_task_high_cpu_prio(struct task_struct *p)
+{
+	return (proc_perf_reserve > 0) && (p->prio < proc_perf_reserve);
+}
+#endif
 
 static inline bool walt_get_rtg_status(struct task_struct *p)
 {

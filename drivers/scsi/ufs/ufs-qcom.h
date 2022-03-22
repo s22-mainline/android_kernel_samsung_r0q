@@ -55,7 +55,7 @@
 
 /* default value of auto suspend is 3 seconds */
 #define UFS_QCOM_AUTO_SUSPEND_DELAY	3000
-#define UFS_QCOM_CLK_GATING_DELAY_MS_PWR_SAVE	10
+#define UFS_QCOM_CLK_GATING_DELAY_MS_PWR_SAVE	20
 #define UFS_QCOM_CLK_GATING_DELAY_MS_PERF	50
 
 /* QCOM UFS host controller vendor specific registers */
@@ -418,6 +418,8 @@ struct ufs_qcom_host {
 	int config_cpu;
 	void *ufs_ipc_log_ctx;
 	bool dbg_en;
+
+	bool skip_flush;
 };
 
 static inline u32

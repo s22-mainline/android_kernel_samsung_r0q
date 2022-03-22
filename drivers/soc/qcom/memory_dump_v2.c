@@ -908,3 +908,15 @@ module_platform_driver(mem_dump_driver);
 
 MODULE_DESCRIPTION("Memory Dump V2 Driver");
 MODULE_LICENSE("GPL v2");
+
+#if IS_ENABLED(CONFIG_SEC_QC_SUMMARY)
+#include <linux/samsung/debug/qcom/sec_qc_summary.h>
+
+void sec_qc_summary_set_msm_memdump_info(struct sec_qc_summary_data_apss *apss)
+{
+	apss->msm_memdump_paddr = (uint64_t)memdump.table_phys;
+	pr_info("%s : 0x%llx\n", __func__, apss->msm_memdump_paddr);
+}
+EXPORT_SYMBOL(sec_qc_summary_set_msm_memdump_info);
+#endif
+

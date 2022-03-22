@@ -978,6 +978,10 @@ static int kgsl_iommu_fault_handler(struct kgsl_mmu *mmu,
 	kgsl_iommu_print_fault(mmu, ctx, addr, ptbase, contextidr, flags, private,
 		context);
 
+#if IS_ENABLED(CONFIG_SEC_ABC)
+	sec_abc_send_event("MODULE=gpu_qc@WARN=gpu_page_fault");
+#endif 
+
 	if (stall) {
 		struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
 		u32 sctlr;
@@ -1124,7 +1128,8 @@ static void kgsl_iommu_destroy_default_pagetable(struct kgsl_pagetable *pagetabl
 static void kgsl_iommu_destroy_pagetable(struct kgsl_pagetable *pagetable)
 {
 	struct kgsl_iommu_pt *pt = to_iommu_pt(pagetable);
-
+	
+	free_io_pgtable_ops(pt->pgtbl_ops);
 	kfree(pt);
 }
 
@@ -1220,18 +1225,16 @@ static struct kgsl_pagetable *kgsl_iommu_default_pagetable(struct kgsl_mmu *mmu)
 
 	if (test_bit(KGSL_MMU_64BIT, &mmu->features)) {
 		iommu_pt->base.compat_va_start = KGSL_IOMMU_SVM_BASE32;
-		iommu_pt->base.compat_va_end = KGSL_IOMMU_GLOBAL_MEM_BASE(mmu);
+		if (test_bit(KGSL_MMU_IOPGTABLE, &mmu->features))
+			iommu_pt->base.compat_va_end = KGSL_MEMSTORE_TOKEN_ADDRESS;
+		else
+			iommu_pt->base.compat_va_end = KGSL_IOMMU_GLOBAL_MEM_BASE64;
 		iommu_pt->base.va_start = KGSL_IOMMU_VA_BASE64;
 		iommu_pt->base.va_end = KGSL_IOMMU_VA_END64;
 
 	} else {
 		iommu_pt->base.va_start = KGSL_IOMMU_SVM_BASE32;
-
-		if (mmu->secured)
-			iommu_pt->base.va_end = KGSL_IOMMU_SECURE_BASE(mmu);
-		else
-			iommu_pt->base.va_end = KGSL_IOMMU_GLOBAL_MEM_BASE(mmu);
-
+		iommu_pt->base.va_end = KGSL_IOMMU_GLOBAL_MEM_BASE(mmu);
 		iommu_pt->base.compat_va_start = iommu_pt->base.va_start;
 		iommu_pt->base.compat_va_end = iommu_pt->base.va_end;
 	}
@@ -1278,8 +1281,8 @@ static struct kgsl_pagetable *kgsl_iommu_secure_pagetable(struct kgsl_mmu *mmu)
 	iommu_pt->base.rbtree = RB_ROOT;
 	iommu_pt->base.pt_ops = &secure_pt_ops;
 
-	iommu_pt->base.compat_va_start = KGSL_IOMMU_SECURE_BASE(mmu);
-	iommu_pt->base.compat_va_end = KGSL_IOMMU_SECURE_END(mmu);
+	iommu_pt->base.compat_va_start = KGSL_IOMMU_SECURE_BASE32;
+	iommu_pt->base.compat_va_end = KGSL_IOMMU_SECURE_END32;
 	iommu_pt->base.va_start = KGSL_IOMMU_SECURE_BASE(mmu);
 	iommu_pt->base.va_end = KGSL_IOMMU_SECURE_END(mmu);
 
@@ -1311,7 +1314,7 @@ static struct kgsl_pagetable *kgsl_iopgtbl_pagetable(struct kgsl_mmu *mmu, u32 n
 
 	if (test_bit(KGSL_MMU_64BIT, &mmu->features)) {
 		pt->base.compat_va_start = KGSL_IOMMU_SVM_BASE32;
-		pt->base.compat_va_end = KGSL_IOMMU_GLOBAL_MEM_BASE(mmu);
+		pt->base.compat_va_end = KGSL_MEMSTORE_TOKEN_ADDRESS;
 		pt->base.va_start = KGSL_IOMMU_VA_BASE64;
 		pt->base.va_end = KGSL_IOMMU_VA_END64;
 
@@ -1325,12 +1328,7 @@ static struct kgsl_pagetable *kgsl_iopgtbl_pagetable(struct kgsl_mmu *mmu, u32 n
 
 	} else {
 		pt->base.va_start = KGSL_IOMMU_SVM_BASE32;
-
-		if (mmu->secured)
-			pt->base.va_end = KGSL_IOMMU_SECURE_BASE(mmu);
-		else
-			pt->base.va_end = KGSL_IOMMU_GLOBAL_MEM_BASE(mmu);
-
+		pt->base.va_end = KGSL_MEMSTORE_TOKEN_ADDRESS;
 		pt->base.compat_va_start = pt->base.va_start;
 		pt->base.compat_va_end = pt->base.va_end;
 		pt->base.svm_start = KGSL_IOMMU_SVM_BASE32;

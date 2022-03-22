@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Copyright (c) 2016-2021, The Linux Foundation. All rights reserved. */
+/*
+ * Copyright (c) 2016-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ */
 
 #include <linux/cma.h>
 #include <linux/io.h>
@@ -220,6 +223,7 @@ static const struct mhi_controller_config cnss_mhi_config = {
 	.ch_cfg = cnss_mhi_channels,
 	.num_events = ARRAY_SIZE(cnss_mhi_events),
 	.event_cfg = cnss_mhi_events,
+	.m2_no_db = true,
 };
 
 static struct cnss_pci_reg ce_src[] = {
@@ -1647,12 +1651,13 @@ EXPORT_SYMBOL(cnss_pci_unlock_reg_window);
  */
 static void cnss_pci_dump_bl_sram_mem(struct cnss_pci_data *pci_priv)
 {
-	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
 	u32 mem_addr, val, pbl_log_max_size, sbl_log_max_size;
-	u32 pbl_log_sram_start, sbl_log_def_start, sbl_log_def_end;
+	u32 pbl_log_sram_start;
 	u32 pbl_stage, sbl_log_start, sbl_log_size;
 	u32 pbl_wlan_boot_cfg, pbl_bootstrap_status;
 	u32 pbl_bootstrap_status_reg = PBL_BOOTSTRAP_STATUS;
+	u32 sbl_log_def_start = SRAM_START;
+	u32 sbl_log_def_end = SRAM_END;
 	int i;
 
 	switch (pci_priv->device_id) {
@@ -1660,28 +1665,17 @@ static void cnss_pci_dump_bl_sram_mem(struct cnss_pci_data *pci_priv)
 		pbl_log_sram_start = QCA6390_DEBUG_PBL_LOG_SRAM_START;
 		pbl_log_max_size = QCA6390_DEBUG_PBL_LOG_SRAM_MAX_SIZE;
 		sbl_log_max_size = QCA6390_DEBUG_SBL_LOG_SRAM_MAX_SIZE;
-		sbl_log_def_start = QCA6390_V2_SBL_DATA_START;
-		sbl_log_def_end = QCA6390_V2_SBL_DATA_END;
 		break;
 	case QCA6490_DEVICE_ID:
 		pbl_log_sram_start = QCA6490_DEBUG_PBL_LOG_SRAM_START;
 		pbl_log_max_size = QCA6490_DEBUG_PBL_LOG_SRAM_MAX_SIZE;
 		sbl_log_max_size = QCA6490_DEBUG_SBL_LOG_SRAM_MAX_SIZE;
-		if (plat_priv->device_version.major_version == FW_V2_NUMBER) {
-			sbl_log_def_start = QCA6490_V2_SBL_DATA_START;
-			sbl_log_def_end = QCA6490_V2_SBL_DATA_END;
-		} else {
-			sbl_log_def_start = QCA6490_V1_SBL_DATA_START;
-			sbl_log_def_end = QCA6490_V1_SBL_DATA_END;
-		}
 		break;
 	case WCN7850_DEVICE_ID:
 		pbl_bootstrap_status_reg = WCN7850_PBL_BOOTSTRAP_STATUS;
 		pbl_log_sram_start = WCN7850_DEBUG_PBL_LOG_SRAM_START;
 		pbl_log_max_size = WCN7850_DEBUG_PBL_LOG_SRAM_MAX_SIZE;
 		sbl_log_max_size = WCN7850_DEBUG_SBL_LOG_SRAM_MAX_SIZE;
-		sbl_log_def_start = WCN7850_SBL_DATA_START;
-		sbl_log_def_end = WCN7850_SBL_DATA_END;
 	default:
 		return;
 	}
@@ -1945,6 +1939,12 @@ retry_mhi_suspend:
 		break;
 	case CNSS_MHI_TRIGGER_RDDM:
 		ret = mhi_force_rddm_mode(pci_priv->mhi_ctrl);
+		if (ret) {
+			cnss_pr_err("Failed to trigger RDDM, err = %d\n", ret);
+
+			cnss_pr_dbg("Sending host reset req\n");
+			ret = mhi_force_reset(pci_priv->mhi_ctrl);
+		}
 		break;
 	case CNSS_MHI_RDDM_DONE:
 		break;
@@ -2690,6 +2690,7 @@ static int cnss_qca6290_powerup(struct cnss_pci_data *pci_priv)
 	struct cnss_plat_data *plat_priv = pci_priv->plat_priv;
 	unsigned int timeout;
 	int retry = 0, bt_en_gpio = plat_priv->pinctrl_info.bt_en_gpio;
+	int sw_ctrl_gpio = plat_priv->pinctrl_info.sw_ctrl_gpio;
 
 	if (plat_priv->ramdump_info_v2.dump_data_valid) {
 		cnss_pci_clear_dump_info(pci_priv);
@@ -2713,6 +2714,8 @@ retry:
 	ret = cnss_resume_pci_link(pci_priv);
 	if (ret) {
 		cnss_pr_err("Failed to resume PCI link, err = %d\n", ret);
+		cnss_pr_dbg("Value of SW_CTRL GPIO: %d\n",
+			    cnss_get_input_gpio_value(plat_priv, sw_ctrl_gpio));
 		if (test_bit(IGNORE_PCI_LINK_FAILURE,
 			     &plat_priv->ctrl_params.quirks)) {
 			cnss_pr_dbg("Ignore PCI link resume failure\n");
@@ -2722,13 +2725,18 @@ retry:
 		if (ret == -EAGAIN && retry++ < POWER_ON_RETRY_MAX_TIMES) {
 			cnss_power_off_device(plat_priv);
 			/* Force toggle BT_EN GPIO low */
-			if (retry == POWER_ON_RETRY_MAX_TIMES &&
-			    bt_en_gpio >= 0) {
-				cnss_pr_info("Set BT_EN GPIO(%u) low\n",
-					     bt_en_gpio);
-				gpio_direction_output(bt_en_gpio, 0);
+			if (retry == POWER_ON_RETRY_MAX_TIMES) {
+				cnss_pr_dbg("Retry #%d. Set BT_EN GPIO(%u) low\n",
+					    retry, bt_en_gpio);
+				if (bt_en_gpio >= 0)
+					gpio_direction_output(bt_en_gpio, 0);
+				cnss_pr_dbg("BT_EN GPIO val: %d\n",
+					    gpio_get_value(bt_en_gpio));
 			}
 			cnss_pr_dbg("Retry to resume PCI link #%d\n", retry);
+			cnss_pr_dbg("Value of SW_CTRL GPIO: %d\n",
+				    cnss_get_input_gpio_value(plat_priv,
+							      sw_ctrl_gpio));
 			msleep(POWER_ON_RETRY_DELAY_MS * retry);
 			goto retry;
 		}
@@ -3021,7 +3029,14 @@ static void cnss_wlan_reg_driver_work(struct work_struct *work)
 	if (test_bit(CNSS_COLD_BOOT_CAL_DONE, &plat_priv->driver_state)) {
 		goto reg_driver;
 	} else {
-		cnss_pr_err("Calibration still not done\n");
+		cnss_pr_err("Timeout waiting for calibration to complete\n");
+		del_timer(&plat_priv->fw_boot_timer);
+		if (plat_priv->charger_mode) {
+			cnss_pr_err("Ignore calibration timeout in charger mode\n");
+			return;
+		}
+		if (!test_bit(CNSS_IN_REBOOT, &plat_priv->driver_state))
+			CNSS_ASSERT(0);
 		cal_info = kzalloc(sizeof(*cal_info), GFP_KERNEL);
 		if (!cal_info)
 			return;
@@ -3029,8 +3044,6 @@ static void cnss_wlan_reg_driver_work(struct work_struct *work)
 		cnss_driver_event_post(plat_priv,
 				       CNSS_DRIVER_EVENT_COLD_BOOT_CAL_DONE,
 				       0, cal_info);
-		/* Temporarily return for bringup. CBC will not be triggered */
-		return;
 	}
 reg_driver:
 	if (test_bit(CNSS_IN_REBOOT, &plat_priv->driver_state)) {
@@ -4143,15 +4156,26 @@ int cnss_pci_alloc_fw_mem(struct cnss_pci_data *pci_priv)
 
 	for (i = 0; i < plat_priv->fw_mem_seg_len; i++) {
 		if (!fw_mem[i].va && fw_mem[i].size) {
+retry:
 			fw_mem[i].va =
 				dma_alloc_attrs(dev, fw_mem[i].size,
 						&fw_mem[i].pa, GFP_KERNEL,
 						fw_mem[i].attrs);
 
 			if (!fw_mem[i].va) {
+				if ((fw_mem[i].attrs &
+				    DMA_ATTR_FORCE_CONTIGUOUS)) {
+					fw_mem[i].attrs &=
+					    ~DMA_ATTR_FORCE_CONTIGUOUS;
+
+					cnss_pr_dbg("Fallback to non-contiguous memory for FW, Mem type: %u\n",
+						    fw_mem[i].type);
+					goto retry;
+				}
+
 				cnss_pr_err("Failed to allocate memory for FW, size: 0x%zx, type: %u\n",
 					    fw_mem[i].size, fw_mem[i].type);
-
+				CNSS_ASSERT(0);
 				return -ENOMEM;
 			}
 		}
@@ -5092,6 +5116,7 @@ static void cnss_pci_send_hang_event(struct cnss_pci_data *pci_priv)
 	struct cnss_hang_event hang_event;
 	void *hang_data_va = NULL;
 	u64 offset = 0;
+	u16 length = 0;
 	int i = 0;
 
 	if (!fw_mem || !plat_priv->fw_mem_seg_len)
@@ -5101,9 +5126,20 @@ static void cnss_pci_send_hang_event(struct cnss_pci_data *pci_priv)
 	switch (pci_priv->device_id) {
 	case QCA6390_DEVICE_ID:
 		offset = HST_HANG_DATA_OFFSET;
+		length = HANG_DATA_LENGTH;
 		break;
 	case QCA6490_DEVICE_ID:
-		offset = HSP_HANG_DATA_OFFSET;
+		/* Fallback to hard-coded values if hang event params not
+		 * present in QMI. Once all the firmware branches have the
+		 * fix to send params over QMI, this can be removed.
+		 */
+		if (plat_priv->hang_event_data_len) {
+			offset = plat_priv->hang_data_addr_offset;
+			length = plat_priv->hang_event_data_len;
+		} else {
+			offset = HSP_HANG_DATA_OFFSET;
+			length = HANG_DATA_LENGTH;
+		}
 		break;
 	default:
 		cnss_pr_err("Skip Hang Event Data as unsupported Device ID received: %d\n",
@@ -5114,15 +5150,19 @@ static void cnss_pci_send_hang_event(struct cnss_pci_data *pci_priv)
 	for (i = 0; i < plat_priv->fw_mem_seg_len; i++) {
 		if (fw_mem[i].type == QMI_WLFW_MEM_TYPE_DDR_V01 &&
 		    fw_mem[i].va) {
+			/* The offset must be < (fw_mem size- hangdata length) */
+			if (!(offset <= fw_mem[i].size - length))
+				goto exit;
+
 			hang_data_va = fw_mem[i].va + offset;
 			hang_event.hang_event_data = kmemdup(hang_data_va,
-							     HANG_DATA_LENGTH,
+							     length,
 							     GFP_ATOMIC);
 			if (!hang_event.hang_event_data) {
 				cnss_pr_dbg("Hang data memory alloc failed\n");
 				return;
 			}
-			hang_event.hang_event_data_len = HANG_DATA_LENGTH;
+			hang_event.hang_event_data_len = length;
 			break;
 		}
 	}
@@ -5131,6 +5171,11 @@ static void cnss_pci_send_hang_event(struct cnss_pci_data *pci_priv)
 
 	kfree(hang_event.hang_event_data);
 	hang_event.hang_event_data = NULL;
+	return;
+exit:
+	cnss_pr_dbg("Invalid hang event params, offset:0x%x, length:0x%x\n",
+		    plat_priv->hang_data_addr_offset,
+		    plat_priv->hang_event_data_len);
 }
 
 void cnss_pci_collect_dump_info(struct cnss_pci_data *pci_priv, bool in_panic)
@@ -5195,6 +5240,8 @@ void cnss_pci_collect_dump_info(struct cnss_pci_data *pci_priv, bool in_panic)
 	rddm_image = pci_priv->mhi_ctrl->rddm_image;
 	dump_data->nentries = 0;
 
+	cnss_mhi_dump_sfr(pci_priv);
+
 	if (!dump_seg) {
 		cnss_pr_warn("FW image dump collection not setup");
 		goto skip_dump;
@@ -5226,19 +5273,22 @@ void cnss_pci_collect_dump_info(struct cnss_pci_data *pci_priv, bool in_panic)
 
 	dump_data->nentries += rddm_image->entries;
 
-	cnss_mhi_dump_sfr(pci_priv);
-
-	cnss_pr_dbg("Collect remote heap dump segment\n");
 
 	for (i = 0, j = 0; i < plat_priv->fw_mem_seg_len; i++) {
 		if (fw_mem[i].type == CNSS_MEM_TYPE_DDR) {
-			cnss_pci_add_dump_seg(pci_priv, dump_seg,
-					      CNSS_FW_REMOTE_HEAP, j,
-					      fw_mem[i].va, fw_mem[i].pa,
-					      fw_mem[i].size);
-			dump_seg++;
-			dump_data->nentries++;
-			j++;
+			if (fw_mem[i].attrs & DMA_ATTR_FORCE_CONTIGUOUS) {
+				cnss_pr_dbg("Collect remote heap dump segment\n");
+				cnss_pci_add_dump_seg(pci_priv, dump_seg,
+						      CNSS_FW_REMOTE_HEAP, j,
+						      fw_mem[i].va,
+						      fw_mem[i].pa,
+						      fw_mem[i].size);
+				dump_seg++;
+				dump_data->nentries++;
+				j++;
+			} else {
+				cnss_pr_dbg("Skip remote heap dumps as it is non-contiguous\n");
+			}
 		}
 	}
 
@@ -5283,7 +5333,8 @@ void cnss_pci_clear_dump_info(struct cnss_pci_data *pci_priv)
 	}
 
 	for (i = 0, j = 0; i < plat_priv->fw_mem_seg_len; i++) {
-		if (fw_mem[i].type == CNSS_MEM_TYPE_DDR) {
+		if (fw_mem[i].type == CNSS_MEM_TYPE_DDR &&
+		    (fw_mem[i].attrs & DMA_ATTR_FORCE_CONTIGUOUS)) {
 			cnss_pci_remove_dump_seg(pci_priv, dump_seg,
 						 CNSS_FW_REMOTE_HEAP, j,
 						 fw_mem[i].va, fw_mem[i].pa,

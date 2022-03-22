@@ -56,6 +56,8 @@
 #include <linux/soc/qcom/qmi.h>
 #include <linux/mem-buf.h>
 
+#include <linux/sec_debug.h>
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/fastrpc.h>
 
@@ -4145,6 +4147,8 @@ static int fastrpc_init_create_static_process(struct fastrpc_file *fl,
 		mutex_lock(&fl->map_mutex);
 		err = fastrpc_mmap_create(fl, -1, NULL, 0, init->mem,
 			 init->memlen, ADSP_MMAP_REMOTE_HEAP_ADDR, &mem);
+		if (mem)
+			mem->is_filemap = true;
 		mutex_unlock(&fl->map_mutex);
 		if (err)
 			goto bail;
@@ -5042,7 +5046,7 @@ static int fastrpc_internal_mem_map(struct fastrpc_file *fl,
 
 	/* create DSP mapping */
 	VERIFY(err, !(err = fastrpc_mem_map_to_dsp(fl, ud->m.fd, ud->m.offset,
-		ud->m.flags, map->va, map->phys, ud->m.length, &map->raddr)));
+		ud->m.flags, map->va, map->phys, map->size, &map->raddr)));
 	if (err)
 		goto bail;
 	ud->m.vaddrout = map->raddr;
@@ -7185,6 +7189,7 @@ static void configure_secure_channels(uint32_t secure_domains)
 
 		me->channel[ii].secure = secure;
 		ADSPRPC_INFO("domain %d configured as secure %d\n", ii, secure);
+		printk("adsprpc: domain %d configured as secure %d\n", ii, secure);
 	}
 }
 
@@ -7231,6 +7236,27 @@ bail:
 	return err;
 }
 
+#define CDSP_SIGNOFF_BLOCK 0x2377
+static char *signoff = NULL;
+module_param(signoff, charp, 0);
+MODULE_PARM_DESC(signoff, "singoff value");
+
+static unsigned int signoff_val;
+unsigned int is_signoff_block(void)
+{
+    pr_err("signoff: %s\n", signoff);
+
+    if (!IS_ERR_OR_NULL(signoff)) {
+        get_option(&signoff, &signoff_val);
+        pr_err("is_signoff_block : 0x%08x\n", signoff_val);
+
+        if (signoff_val == CDSP_SIGNOFF_BLOCK)
+                return 1;
+    }
+
+    return 0;
+}
+
 static int fastrpc_probe(struct platform_device *pdev)
 {
 	int err = 0;
@@ -7251,7 +7277,7 @@ static int fastrpc_probe(struct platform_device *pdev)
 		of_property_read_u32(dev->of_node, "qcom,rpc-latency-us",
 			&me->latency);
 		if (of_get_property(dev->of_node,
-			"qcom,secure-domains", NULL) != NULL) {
+			"qcom,secure-domains", NULL) != NULL && is_signoff_block()) {
 			VERIFY(err, !of_property_read_u32(dev->of_node,
 					  "qcom,secure-domains",
 			      &secure_domains));

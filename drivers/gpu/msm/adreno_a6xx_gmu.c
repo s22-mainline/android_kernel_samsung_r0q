@@ -2396,7 +2396,7 @@ static void a6xx_free_gmu_globals(struct a6xx_gmu_device *gmu)
 {
 	int i;
 
-	for (i = 0; i < gmu->global_entries; i++) {
+	for (i = 0; i < gmu->global_entries && i < ARRAY_SIZE(gmu->gmu_globals); i++) {
 		struct kgsl_memdesc *md = &gmu->gmu_globals[i];
 
 		if (!md->gmuaddr)
@@ -2917,7 +2917,8 @@ static int a6xx_boot(struct adreno_device *adreno_dev)
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	int ret;
 
-	WARN_ON(test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags));
+	if (WARN_ON(test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags)))
+		return 0;
 
 	trace_kgsl_pwr_request_state(device, KGSL_STATE_ACTIVE);
 
@@ -2949,8 +2950,12 @@ static int a6xx_first_boot(struct adreno_device *adreno_dev)
 	struct a6xx_gmu_device *gmu = to_a6xx_gmu(adreno_dev);
 	int ret;
 
-	if (test_bit(GMU_PRIV_FIRST_BOOT_DONE, &gmu->flags))
-		return a6xx_boot(adreno_dev);
+	if (test_bit(GMU_PRIV_FIRST_BOOT_DONE, &gmu->flags)) {
+		if (!test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags))
+			return a6xx_boot(adreno_dev);
+
+		return 0;
+	}
 
 	ret = a6xx_ringbuffer_init(adreno_dev);
 	if (ret)
@@ -3034,9 +3039,17 @@ static int a6xx_power_off(struct adreno_device *adreno_dev)
 
 	WARN_ON(!test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags));
 
-	trace_kgsl_pwr_request_state(device, KGSL_STATE_SLUMBER);
-
 	adreno_suspend_context(device);
+	
+	/*
+	 * adreno_suspend_context() unlocks the device mutex, which
+	 * could allow a concurrent thread to attempt SLUMBER sequence.
+	 * Hence, check the flags again before proceeding with SLUMBER.
+	 */
+	if (!test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags))
+		return 0;
+
+	trace_kgsl_pwr_request_state(device, KGSL_STATE_SLUMBER);
 
 	ret = a6xx_gmu_oob_set(device, oob_gpu);
 	if (ret) {

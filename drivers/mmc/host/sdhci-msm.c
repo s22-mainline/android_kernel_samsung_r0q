@@ -30,6 +30,11 @@
 #include "cqhci.h"
 #include "../core/core.h"
 #include <linux/crypto-qti-common.h>
+#include <linux/qtee_shmbridge.h>
+
+#if IS_ENABLED(CONFIG_SEC_MMC_FEATURE)
+#include "mmc-sec-feature.h"
+#endif
 
 #define CORE_MCI_VERSION		0x50
 #define CORE_VERSION_MAJOR_SHIFT	28
@@ -1557,6 +1562,9 @@ retry:
 		if (rc)
 			return rc;
 		msm_host->saved_tuning_phase = phase;
+#if IS_ENABLED(CONFIG_SEC_MMC_FEATURE)
+		mmc_sec_save_tuning_phase(phase);
+#endif
 		dev_dbg(mmc_dev(mmc), "%s: Setting the tuning phase to %d\n",
 			 mmc_hostname(mmc), phase);
 	} else {
@@ -2822,6 +2830,11 @@ static int sdhci_msm_program_key(struct cqhci_host *cq_host,
 	} key;
 	int i;
 	int err;
+	struct qtee_shm shm;
+
+	err = qtee_shmbridge_allocate_shm(AES_256_XTS_KEY_SIZE, &shm);
+	if (err)
+		return -ENOMEM;
 
 	if (!(cfg->config_enable & CQHCI_CRYPTO_CONFIGURATION_ENABLE))
 		return qcom_scm_ice_invalidate_key(slot);
@@ -2845,9 +2858,19 @@ static int sdhci_msm_program_key(struct cqhci_host *cq_host,
 	for (i = 0; i < ARRAY_SIZE(key.words); i++)
 		__cpu_to_be32s(&key.words[i]);
 
-	err = qcom_scm_ice_set_key(slot, key.bytes, AES_256_XTS_KEY_SIZE,
-				   QCOM_SCM_ICE_CIPHER_AES_256_XTS,
-				   cfg->data_unit_size);
+	memcpy(shm.vaddr, key.bytes, AES_256_XTS_KEY_SIZE);
+	qtee_shmbridge_flush_shm_buf(&shm);
+
+	err = qcom_scm_config_set_ice_key(slot, shm.paddr,
+					AES_256_XTS_KEY_SIZE,
+					QCOM_SCM_ICE_CIPHER_AES_256_XTS,
+					cfg->data_unit_size, SDCC_CE);
+	if (err)
+		pr_err("%s:SCM call Error: 0x%x slot %d\n",
+				__func__, err, slot);
+
+	qtee_shmbridge_inv_shm_buf(&shm);
+	qtee_shmbridge_free_shm(&shm);
 	memzero_explicit(&key, sizeof(key));
 	return err;
 }
@@ -3862,6 +3885,17 @@ out:
 	return;
 }
 
+#if IS_ENABLED(CONFIG_SEC_MMC_FEATURE)
+void sdhci_msm_sec_request_done(struct sdhci_host *host,
+		struct mmc_request *mrq)
+{
+	mmc_sec_check_request_error(host, mrq);
+
+	/* call mmc_request_done() to finish processing an MMC request */
+	mmc_request_done(host->mmc, mrq);
+}
+#endif
+
 static const struct sdhci_ops sdhci_msm_ops = {
 	.reset = sdhci_msm_reset,
 	.set_clock = sdhci_msm_set_clock,
@@ -3876,6 +3910,9 @@ static const struct sdhci_ops sdhci_msm_ops = {
 	.dump_vendor_regs = sdhci_msm_dump_vendor_regs,
 	.set_power = sdhci_set_power_noreg,
 	.hw_reset = sdhci_msm_hw_reset,
+#if IS_ENABLED(CONFIG_SEC_MMC_FEATURE)
+	.request_done = sdhci_msm_sec_request_done,
+#endif
 };
 
 static const struct sdhci_pltfm_data sdhci_msm_pdata = {
@@ -4523,6 +4560,9 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 	sdhci_msm_get_of_property(pdev, host);
 
 	msm_host->saved_tuning_phase = INVALID_TUNING_PHASE;
+#if IS_ENABLED(CONFIG_SEC_MMC_FEATURE)
+	mmc_sec_save_tuning_phase(INVALID_TUNING_PHASE);
+#endif
 
 	ret = sdhci_msm_populate_pdata(dev, msm_host);
 	if (ret) {
@@ -4756,6 +4796,10 @@ static int sdhci_msm_probe(struct platform_device *pdev)
 	sdhci_msm_qos_init(msm_host);
 	/* Initialize sysfs entries */
 	sdhci_msm_init_sysfs_gating_qos(dev);
+
+#if IS_ENABLED(CONFIG_SEC_MMC_FEATURE)
+	mmc_set_sec_features(host->mmc, pdev);
+#endif
 
 	if (of_property_read_bool(node, "supports-cqe"))
 		ret = sdhci_msm_cqe_add_host(host, pdev);

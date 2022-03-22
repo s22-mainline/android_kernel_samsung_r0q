@@ -440,7 +440,7 @@ static int spcom_init_channel(struct spcom_channel *ch,
 		spcom_pr_err("invalid parameters\n");
 		return -EINVAL;
 	}
-
+	spcom_pr_err("debug_ss: spcom_init_channel\n");
 	strlcpy(ch->name, name, SPCOM_CHANNEL_NAME_SIZE);
 
 	init_completion(&ch->rx_done);
@@ -671,7 +671,7 @@ static int spcom_handle_create_channel_command(void *cmd_buf, int cmd_size)
 	int ret = 0;
 	struct spcom_user_create_channel_command *cmd = cmd_buf;
 	const size_t maxlen = sizeof(cmd->ch_name);
-
+    spcom_pr_err("debug_ss:spcom_handle_create_channel_command\n");
 	if (cmd_size != sizeof(*cmd)) {
 		spcom_pr_err("cmd_size [%d] , expected [%d]\n",
 		       (int) cmd_size,  (int) sizeof(*cmd));
@@ -2011,6 +2011,8 @@ static int spcom_register_channel(struct spcom_channel *ch)
 	ch_name = ch->name;
 
 	mutex_lock(&ch->lock);
+	spcom_pr_err("the pid name [%s] of pid [%d] try to open [%s] channel\n",
+		     current->comm, pid, ch_name);
 
 	if (!spcom_is_channel_open(ch))
 		spcom_pr_err("channel [%s] is not open\n", ch_name);
@@ -2412,6 +2414,7 @@ static int spcom_create_channel(const char *ch_name, bool is_sharable)
 	int ret = 0;
 	int i = 0;
 
+    spcom_pr_err("debug_ss:spcom_create_channel\n");
 	/* check if spcom remove was called */
 	if (atomic_read(&spcom_dev->remove_in_progress)) {
 		spcom_pr_err("module remove in progress\n");
@@ -2428,7 +2431,7 @@ static int spcom_create_channel(const char *ch_name, bool is_sharable)
 		return -EINVAL;
 	}
 
-	spcom_pr_dbg("create spcom channel, name[%s], is sharable[%d]\n", ch_name, is_sharable);
+	spcom_pr_err("create spcom channel, name[%s], is sharable[%d]\n", ch_name, is_sharable);
 
 	for (i = 0; i < SPCOM_MAX_CHANNELS; ++i) {
 
@@ -2519,7 +2522,7 @@ static int spcom_ioctl_handle_channel_register_command(struct spcom_ioctl_ch *ar
 	struct spcom_channel *ch = NULL;
 	const char *ch_name =  arg->ch_name;
 	int ret = 0;
-
+    spcom_pr_err("debug_ss: spcom_ioctl_handle_channel_register_command\n");
 	if (!current_pid()) {
 		spcom_pr_err("unknown PID\n");
 		return -EINVAL;
@@ -3029,7 +3032,7 @@ static int spcom_ioctl_handle_get_next_req_msg_size(struct spcom_ioctl_next_requ
 	const char *ch_name = NULL;
 	int ret = 0;
 
-	spcom_pr_dbg("Get next request msg size cmd arg: ch_name[%s], size[%u], padding[%d]\n",
+	spcom_pr_err("Get next request msg size cmd arg: ch_name[%s], size[%u], padding[%d]\n",
 		arg->ch_name, arg->size, arg->padding);
 
 	ch_name = arg->ch_name;
@@ -3044,7 +3047,7 @@ static int spcom_ioctl_handle_get_next_req_msg_size(struct spcom_ioctl_next_requ
 	if (ret < 0)
 		return ret;
 
-	spcom_pr_dbg("Channel[%s], next request size[%d]\n", ch_name, ret);
+	spcom_pr_err("Channel[%s], next request size[%d]\n", ch_name, ret);
 
 	/* Copy next request size to user space */
 	ret = put_user(ret, user_size);
@@ -3184,7 +3187,7 @@ static long spcom_device_ioctl(struct file *file, unsigned int cmd, unsigned lon
 	uint32_t arg_size = 0;
 	int ret = 0;
 
-	spcom_pr_dbg("ioctl cmd [%u], PID [%d]\n", _IOC_NR(cmd), current_pid());
+	spcom_pr_err("ioctl cmd [%u], PID [%d]\n", _IOC_NR(cmd), current_pid());
 
 	if (atomic_read(&spcom_dev->remove_in_progress)) {
 		spcom_pr_err("module remove in progress\n");
@@ -3239,6 +3242,7 @@ static long spcom_device_ioctl(struct file *file, unsigned int cmd, unsigned lon
 		return spcom_ioctl_handle_create_shared_ch_command(&(arg_copy.channel));
 
 	case SPCOM_IOCTL_CH_REGISTER:
+	    spcom_pr_err("debug_ss: SPCOM_IOCTL_CH_REGISTER\n");
 		return spcom_ioctl_handle_channel_register_command(&(arg_copy.channel));
 
 	case SPCOM_IOCTL_CH_UNREGISTER:
@@ -3290,7 +3294,7 @@ static int spcom_create_channel_chardev(const char *name, bool is_sharable)
 	void *priv;
 	struct cdev *cdev;
 
-	spcom_pr_dbg("creating channel [%s]\n", name);
+	spcom_pr_err("creating channel [%s]\n", name);
 
 	ch = spcom_find_channel_by_name(name);
 	if (ch) {
@@ -3309,13 +3313,13 @@ static int spcom_create_channel_chardev(const char *name, bool is_sharable)
 		spcom_pr_err("can't init channel %d\n", ret);
 		return ret;
 	}
-
+	spcom_pr_err("debug_ss: spcom_init_channel success\n");
 	ret = spcom_register_rpmsg_drv(ch);
 	if (ret < 0) {
 		spcom_pr_err("register rpmsg driver failed %d\n", ret);
 		goto exit_destroy_channel;
 	}
-
+    spcom_pr_err("debug_ss: spcom_register_rpmsg_drv success\n");
 	cdev = kzalloc(sizeof(*cdev), GFP_KERNEL);
 	if (!cdev) {
 		ret = -ENOMEM;
@@ -3330,7 +3334,7 @@ static int spcom_create_channel_chardev(const char *name, bool is_sharable)
 		ret = -ENODEV;
 		goto exit_free_cdev;
 	}
-
+	spcom_pr_err("debug_ss: device_create success\n");
 	cdev_init(cdev, &fops);
 	cdev->owner = THIS_MODULE;
 
@@ -3340,6 +3344,7 @@ static int spcom_create_channel_chardev(const char *name, bool is_sharable)
 		ret = -ENODEV;
 		goto exit_destroy_device;
 	}
+	spcom_pr_err("debug_ss: cdev_add success\n");
 	spcom_dev->chdev_count++;
 
 	mutex_lock(&ch->lock);
@@ -3626,6 +3631,7 @@ static int spcom_rpdev_probe(struct rpmsg_device *rpdev)
 {
 	const char *name;
 	struct spcom_channel *ch;
+	u32 pid = current_pid();
 
 	if (!rpdev) {
 		spcom_pr_err("rpdev is NULL\n");
@@ -3640,7 +3646,13 @@ static int spcom_rpdev_probe(struct rpmsg_device *rpdev)
 			name);
 		return 0;
 	}
+
+#if 1 //debug
+	spcom_pr_err("new channel %s rpmsg_device arrived, pid=%d, rpmsg_dev_count=%d\n", name, pid, spcom_dev->rpmsg_dev_count);
+#else
 	spcom_pr_dbg("new channel %s rpmsg_device arrived\n", name);
+#endif
+
 	ch = spcom_find_channel_by_name(name);
 	if (!ch) {
 		spcom_pr_err("channel %s not found\n", name);
@@ -3710,7 +3722,7 @@ static int spcom_register_rpmsg_drv(struct spcom_channel *ch)
 	struct rpmsg_device_id *match;
 	char *drv_name;
 	int ret;
-
+    spcom_pr_err("debug_ss: spcom_register_rpmsg_drv\n");
 	if (ch->rpdrv) {
 		spcom_pr_err("ch:%s, rpmsg driver %s already registered\n",
 			     ch->name, ch->rpdrv->id_table->name);
@@ -3720,7 +3732,7 @@ static int spcom_register_rpmsg_drv(struct spcom_channel *ch)
 	rpdrv = kzalloc(sizeof(*rpdrv), GFP_KERNEL);
 	if (!rpdrv)
 		return -ENOMEM;
-
+	spcom_pr_err("debug_ss: kzalloc success\n");
 	/* zalloc array of two to NULL terminate the match list */
 	match = kzalloc(2 * sizeof(*match), GFP_KERNEL);
 	if (!match) {
@@ -3728,7 +3740,7 @@ static int spcom_register_rpmsg_drv(struct spcom_channel *ch)
 		return -ENOMEM;
 	}
 	snprintf(match->name, RPMSG_NAME_SIZE, "%s", ch->name);
-
+    spcom_pr_err("debug_ss: kzalloc 2 success\n");  
 	drv_name = kasprintf(GFP_KERNEL, "%s_%s", "spcom_rpmsg_drv", ch->name);
 	if (!drv_name) {
 		spcom_pr_err("can't allocate drv_name for %s\n", ch->name);
@@ -3736,7 +3748,7 @@ static int spcom_register_rpmsg_drv(struct spcom_channel *ch)
 		kfree(match);
 		return -ENOMEM;
 	}
-
+   spcom_pr_err("debug_ss: kasprintf success\n");
 	rpdrv->probe = spcom_rpdev_probe;
 	rpdrv->remove = spcom_rpdev_remove;
 	rpdrv->callback = spcom_rpdev_cb;
@@ -3750,6 +3762,7 @@ static int spcom_register_rpmsg_drv(struct spcom_channel *ch)
 		kfree(drv_name);
 		return ret;
 	}
+	spcom_pr_err("debug_ss: register_rpmsg_driver success\n");
 	mutex_lock(&ch->lock);
 	ch->rpdrv = rpdrv;
 	ch->rpmsg_abort = false;

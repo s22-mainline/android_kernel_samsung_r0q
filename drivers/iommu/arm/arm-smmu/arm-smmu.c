@@ -124,6 +124,7 @@ static struct arm_smmu_option_prop arm_smmu_options[] = {
 	{ ARM_SMMU_OPT_3LVL_TABLES, "qcom,use-3-lvl-tables" },
 	{ ARM_SMMU_OPT_NO_ASID_RETENTION, "qcom,no-asid-retention" },
 	{ ARM_SMMU_OPT_DISABLE_ATOS, "qcom,disable-atos" },
+	{ ARM_SMMU_OPT_WAIPIO_CONTEXT_FAULT_RETRY, "qcom,context-fault-retry" },
 	{ 0, NULL},
 };
 
@@ -905,6 +906,47 @@ static int arm_smmu_get_fault_ids(struct iommu_domain *domain,
 	return 0;
 }
 
+#ifdef CONFIG_ARM_SMMU_WAIPIO_CONTEXT_FAULT_RETRY
+/*
+ * Retry faulting address after tlb invalidate.
+ * Applicable to:  Waipio
+ */
+static irqreturn_t waipio_context_fault(struct arm_smmu_domain *smmu_domain)
+{
+	struct arm_smmu_device *smmu = smmu_domain->smmu;
+	int idx = smmu_domain->cfg.cbndx;
+	u64 iova;
+	u32 fsr;
+
+	if (!(smmu->options & ARM_SMMU_OPT_WAIPIO_CONTEXT_FAULT_RETRY) ||
+	    (test_bit(DOMAIN_ATTR_FAULT_MODEL_NO_STALL, smmu_domain->attributes)))
+		return IRQ_NONE;
+
+	iova = arm_smmu_cb_readq(smmu, idx, ARM_SMMU_CB_FAR);
+	fsr = arm_smmu_cb_read(smmu, idx, ARM_SMMU_CB_FSR);
+
+	if (iova != smmu_domain->prev_fault_address ||
+			!smmu_domain->fault_retry_counter) {
+		smmu_domain->prev_fault_address = iova;
+		smmu_domain->fault_retry_counter++;
+		arm_smmu_tlb_inv_context_s1(smmu_domain);
+		arm_smmu_cb_write(smmu, idx, ARM_SMMU_CB_FSR, fsr);
+		wmb();
+		arm_smmu_cb_write(smmu, idx, ARM_SMMU_CB_RESUME,
+					ARM_SMMU_RESUME_RESUME);
+		return IRQ_HANDLED;
+	}
+
+	return IRQ_NONE;
+}
+#else
+static irqreturn_t waipio_context_fault(struct arm_smmu_domain *smmu_domain)
+{
+	return IRQ_NONE;
+}
+#endif
+
+static __always_inline void __sec_debug_bug_on_enosys(struct arm_smmu_domain *smmu_domain, int idx);
 static irqreturn_t arm_smmu_context_fault(int irq, void *dev)
 {
 	u32 fsr;
@@ -934,6 +976,10 @@ static irqreturn_t arm_smmu_context_fault(int irq, void *dev)
 		BUG();
 	}
 
+	ret = waipio_context_fault(smmu_domain);
+	if (ret == IRQ_HANDLED)
+		goto out_power_off;
+
 	/*
 	 * If the fault helper returns -ENOSYS, then no client fault helper was
 	 * registered. In that case, print the default report.
@@ -957,7 +1003,11 @@ static irqreturn_t arm_smmu_context_fault(int irq, void *dev)
 			print_fault_regs(smmu_domain, smmu, idx);
 			arm_smmu_verify_fault(smmu_domain, smmu, idx);
 		}
+#if IS_ENABLED(CONFIG_SEC_DEBUG)
+		__sec_debug_bug_on_enosys(smmu_domain, idx);
+#else
 		BUG_ON(!test_bit(DOMAIN_ATTR_NON_FATAL_FAULTS, smmu_domain->attributes));
+#endif
 	}
 	if (ret != -EBUSY) {
 		arm_smmu_cb_write(smmu, idx, ARM_SMMU_CB_FSR, fsr);
@@ -4170,3 +4220,71 @@ module_exit(arm_smmu_exit);
 MODULE_DESCRIPTION("IOMMU API for ARM architected SMMU implementations");
 MODULE_AUTHOR("Will Deacon <will@kernel.org>");
 MODULE_LICENSE("GPL v2");
+
+static const char *__arm_smmu_get_devname(struct device *dev)
+{
+	const char *token;
+	const char *delim = ":,.";
+	const char *devname;
+
+	token = dev_name(dev);
+	if (!token)
+		return "No Name";
+
+	pr_info("smmu client name - %s\n", token);
+
+	/* FIXME: the name of pci client only has delimeters and numbers */
+	if (dev_is_pci(dev))
+		return token;
+
+	while (true) {
+		devname = token;
+		token = strpbrk(token, delim);
+		if (!token)
+			break;
+		token++;	/* skip delimiter */
+	}
+
+	return devname;
+}
+
+static const char *arm_smmu_get_devname(const struct arm_smmu_domain *smmu_domain,
+		u32 sid)
+{
+	struct iommu_fwspec *fwspec = NULL;
+	struct device* dev = NULL;
+	unsigned int i;
+
+	if (smmu_domain->dev)
+		fwspec = dev_iommu_fwspec_get(smmu_domain->dev);
+
+	for (i = 0; fwspec && i < fwspec->num_ids; i++) {
+		if ((fwspec->ids[i] & smmu_domain->smmu->streamid_mask) == sid) {
+			dev = smmu_domain->dev;
+			break;
+		}
+	}
+
+	if (!fwspec || !dev)
+		return "No Device";
+
+	return __arm_smmu_get_devname(dev);
+}
+
+static __always_inline void __sec_debug_bug_on_enosys(
+		struct arm_smmu_domain *smmu_domain, int idx)
+{
+	bool cond = !test_bit(DOMAIN_ATTR_NON_FATAL_FAULTS, smmu_domain->attributes);
+	struct arm_smmu_device *smmu = smmu_domain->smmu;
+	u32 cbfrsynra;
+	u32 sid;
+
+	if (likely(!cond))
+		return;
+
+	cbfrsynra = arm_smmu_gr1_read(smmu, ARM_SMMU_GR1_CBFRSYNRA(idx));
+	sid = cbfrsynra & CBFRSYNRA_SID_MASK;
+
+	panic("%s SMMU Fault - SID=0x%x", arm_smmu_get_devname(smmu_domain, sid), sid);
+
+}

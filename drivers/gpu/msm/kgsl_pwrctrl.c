@@ -1557,12 +1557,9 @@ int kgsl_pwrctrl_init(struct kgsl_device *device)
 
 	init_waitqueue_head(&device->active_cnt_wq);
 
-	/* Initialize the user and thermal clock constraints */
-
-	pwr->max_pwrlevel = 0;
-	pwr->min_pwrlevel = pwr->num_pwrlevels - 1;
+	/* Initialize the thermal clock constraints */
 	pwr->thermal_pwrlevel = 0;
-	pwr->thermal_pwrlevel_floor = pwr->min_pwrlevel;
+	pwr->thermal_pwrlevel_floor = pwr->num_pwrlevels - 1;
 
 	pwr->wakeup_maxpwrlevel = 0;
 
@@ -2262,31 +2259,6 @@ int kgsl_pwrctrl_set_default_gpu_pwrlevel(struct kgsl_device *device)
 
 	/* Request adjusted DCVS level */
 	return device->ftbl->gpu_clock_set(device, pwr->active_pwrlevel);
-}
-
-/**
- * kgsl_pwrctrl_update_thermal_pwrlevel() - Update GPU thermal power level
- * @device: Pointer to the kgsl_device struct
- */
-void kgsl_pwrctrl_update_thermal_pwrlevel(struct kgsl_device *device)
-{
-	s32 qos_max_freq = dev_pm_qos_read_value(&device->pdev->dev,
-				DEV_PM_QOS_MAX_FREQUENCY);
-	int level = 0;
-
-	if (qos_max_freq != PM_QOS_MAX_FREQUENCY_DEFAULT_VALUE) {
-		level = _get_nearest_pwrlevel(&device->pwrctrl,
-				qos_max_freq * 1000);
-		if (level < 0)
-			return;
-	}
-
-	if (level != device->pwrctrl.thermal_pwrlevel) {
-		trace_kgsl_thermal_constraint(
-			device->pwrctrl.pwrlevels[level].gpu_freq);
-
-		device->pwrctrl.thermal_pwrlevel = level;
-	}
 }
 
 int kgsl_gpu_num_freqs(void)

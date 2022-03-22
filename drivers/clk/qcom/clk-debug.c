@@ -756,24 +756,49 @@ static int clock_debug_print_clock(struct hw_debug_clk *dclk, struct seq_file *s
 		if (!clk_hw)
 			break;
 
-		clk_enabled = clk_hw_is_enabled(clk_hw);
-		clk_prepared = clk_hw_is_prepared(clk_hw);
 		clk_rate = clk_hw_get_rate(clk_hw);
 		vdd_level = clk_list_rate_vdd_level(clk_hw, clk_rate);
 
-		if (vdd_level)
-			clock_debug_output_cont(s, "%s%s:%u:%u [%ld, %d]", start,
+		if (s) {
+			/*
+			 * Only call clk_hw_is_enabled() if we're printing to a
+			 * debugfs file. If we're printing to the kernel log in
+			 * the debug_suspend path, then we aren't guaranteed to
+			 * have the necessary regulators enabled for register
+			 * access. And if the clock defines the is_enabled()
+			 * callback, then it'll access registers and cause a
+			 * bus error.
+			 */
+			clk_enabled = clk_hw_is_enabled(clk_hw);
+			clk_prepared = clk_hw_is_prepared(clk_hw);
+
+			if (vdd_level)
+				clock_debug_output_cont(s, "%s%s:%u:%u [%ld, %d]", start,
+					clk_hw_get_name(clk_hw),
+					clk_enabled,
+					clk_prepared,
+					clk_rate,
+					vdd_level);
+			else
+				clock_debug_output_cont(s, "%s%s:%u:%u [%ld]", start,
+					clk_hw_get_name(clk_hw),
+					clk_enabled,
+					clk_prepared,
+					clk_rate);
+		} else if (vdd_level) {
+			clock_debug_output_cont(s, "%s%s [%ld, %d]", start,
 				clk_hw_get_name(clk_hw),
-				clk_enabled,
-				clk_prepared,
 				clk_rate,
 				vdd_level);
-		else
-			clock_debug_output_cont(s, "%s%s:%u:%u [%ld]", start,
+		} else {
+			clock_debug_output_cont(s, "%s%s [%ld]", start,
 				clk_hw_get_name(clk_hw),
-				clk_enabled,
-				clk_prepared,
 				clk_rate);
+		}
+
+		if (clk_hw_get_num_parents(clk_hw) == 0)
+			break;
+
 		start = " -> ";
 
 	} while ((clk = clk_get_parent(clk_hw->clk)));
@@ -868,7 +893,6 @@ static void clk_debug_suspend_trace_probe(void *unused,
 					const char *action, int val, bool start)
 {
 	if (start && val > 0 && !strcmp("machine_suspend", action)) {
-		pr_info("Enabled Clocks:\n");
 		mutex_lock(&clk_debug_lock);
 		clock_debug_print_enabled_clocks(NULL);
 		mutex_unlock(&clk_debug_lock);
@@ -962,6 +986,18 @@ int clk_debug_init(void)
 {
 	static struct dentry *rootdir;
 	int ret = 0;
+
+#if IS_ENABLED(CONFIG_SEC_PM)
+	ret = register_trace_suspend_resume(
+		clk_debug_suspend_trace_probe, NULL);
+	if (ret) {
+		pr_err("%s: Failed to register suspend trace callback, ret=%d\n",
+			__func__, ret);
+		return ret;
+	}
+	else
+		debug_suspend = true;
+#endif
 
 	rootdir = debugfs_lookup("clk", NULL);
 	if (IS_ERR_OR_NULL(rootdir)) {

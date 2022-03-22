@@ -234,4 +234,10 @@ config JZ4770_PHY
 	  This driver provides PHY support for the USB controller found
 	  on the JZ-series and X-series SoCs from Ingenic.
 
+config USB_PHY_TUNING_QCOM
+	bool "USB PHY TUNING QCOM"
+	depends on ARCH_QCOM
+	help
+	  Enable this to tune usb phy register.
+
 endmenu

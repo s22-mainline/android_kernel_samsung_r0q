@@ -227,6 +227,9 @@ static int glink_subdev_prepare(struct rproc_subdev *subdev)
 	trace_rproc_qcom_event(dev_name(glink->dev->parent), GLINK_SUBDEV_NAME, "prepare");
 
 	glink->edge = qcom_glink_smem_register(glink->dev, glink->node);
+	pr_err("QCT: [%s] glink:%px edge:%px\n", __func__, glink, glink->edge);
+	if (!glink->edge)
+		dump_stack();
 
 	return PTR_ERR_OR_ZERO(glink->edge);
 }
@@ -243,12 +246,15 @@ static int glink_subdev_start(struct rproc_subdev *subdev)
 static void glink_subdev_stop(struct rproc_subdev *subdev, bool crashed)
 {
 	struct qcom_rproc_glink *glink = to_glink_subdev(subdev);
+	void *backup_edge = (void *)glink->edge;
 
 	trace_rproc_qcom_event(dev_name(glink->dev->parent), GLINK_SUBDEV_NAME,
 			       crashed ? "crash stop" : "stop");
 
 	qcom_glink_smem_unregister(glink->edge);
 	glink->edge = NULL;
+	pr_err("QCT: [%s] glink:%px edge:%px -> null\n", __func__, glink, backup_edge);
+	dump_stack();
 }
 
 static void glink_subdev_unprepare(struct rproc_subdev *subdev)

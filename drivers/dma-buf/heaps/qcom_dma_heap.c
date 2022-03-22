@@ -14,6 +14,12 @@
 #include "qcom_system_heap.h"
 #include "qcom_carveout_heap.h"
 #include "qcom_secure_system_heap.h"
+#include "qcom_bitstream_contig_heap.h"
+
+
+#if defined(CONFIG_RBIN)
+int add_rbin_heap(struct platform_heap *heap_data);
+#endif
 
 static int qcom_dma_heap_probe(struct platform_device *pdev)
 {
@@ -65,11 +71,21 @@ static int qcom_dma_heap_probe(struct platform_device *pdev)
 				pr_info("%s: DMA-BUF Heap: Created %s\n", __func__,
 					heap_data->name);
 			break;
+		case HEAP_TYPE_RBIN:
+			ret = add_rbin_heap(heap_data);
+			if (ret < 0)
+				pr_err("%s: DMA-BUF Heap: Failed to create %s, error is %d\n",
+				       __func__, heap_data->name, ret);
+			else if (!ret)
+				pr_info("%s: DMA-BUF Heap: Created %s\n", __func__,
+					heap_data->name);
+			break;
 		default:
 			pr_err("%s: Unknown heap type %u\n", __func__, heap_data->type);
 			break;
 		}
 	}
+	qcom_add_bitstream_contig_heap("system-secure");
 
 	free_pdata(heaps);
 

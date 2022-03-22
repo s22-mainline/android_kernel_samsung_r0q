@@ -1110,3 +1110,12 @@ config MMC_CRYPTO_QTI
          Enable Vendor Crypto Engine Support in CQHCI
          Enabling this allows kernel to use CQHCI crypto operations defined
          and implemented by QTI.
+
+config SEC_MMC_FEATURE
+	bool "SEC specific MMC/SD feature"
+	depends on MMC_SDHCI_MSM
+	help
+	  Enable Samsung feature support
+	  Enabling this allows kernel to use SEC specific feature
+	  defined and implemented by SEC.
+

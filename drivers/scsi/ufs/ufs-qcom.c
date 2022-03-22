@@ -30,6 +30,10 @@
 #include "ufs_quirks.h"
 #include "ufshcd-crypto-qti.h"
 
+#if IS_ENABLED(CONFIG_SEC_UFS_FEATURE)
+#include "ufs-sec-feature.h"
+#endif
+
 #define UFS_QCOM_DEFAULT_DBG_PRINT_EN	\
 	(UFS_QCOM_DBG_PRINT_REGS_EN | UFS_QCOM_DBG_PRINT_TEST_BUS_EN)
 
@@ -493,6 +497,11 @@ static int ufs_qcom_host_reset(struct ufs_hba *hba)
 	bool reenable_intr = false;
 
 	host->reset_in_progress = true;
+
+#if IS_ENABLED(CONFIG_SEC_UFS_FEATURE)
+	/* check device_stuck info and call panic before host reset */
+	ufs_sec_check_device_stuck();
+#endif
 
 	if (!host->core_reset) {
 		dev_warn(hba->dev, "%s: reset control not set\n", __func__);
@@ -1310,6 +1319,20 @@ static int ufs_qcom_resume(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
 	int err;
 
+#if IS_ENABLED(CONFIG_SEC_UFS_FEATURE)
+	/*
+	 * Change WB state to WB_OFF to default in resume sequence.
+	 * In system PM, the link is "link off state" or "hibern8".
+	 * In case of link off state,
+	 *  just reset the WB state because UFS device needs to setup link.
+	 * In Hibern8 state,
+	 *  wb_off reset and WB off are required.
+	 */
+	if (ufshcd_is_system_pm(pm_op)) {
+		ufs_sec_wb_force_off(hba);
+	}
+#endif
+
 	if (host->vddp_ref_clk && (hba->rpm_lvl > UFS_PM_LVL_3 ||
 				   hba->spm_lvl > UFS_PM_LVL_3))
 		ufs_qcom_enable_vreg(hba->dev,
@@ -1835,6 +1858,8 @@ static int ufs_qcom_pwr_change_notify(struct ufs_hba *hba,
 		if (ufshcd_is_hs_mode(&hba->pwr_info) &&
 			!ufshcd_is_hs_mode(dev_req_params))
 			ufs_qcom_dev_ref_clk_ctrl(host, false);
+
+		host->skip_flush = false;
 		break;
 	default:
 		ret = -EINVAL;
@@ -1926,8 +1951,8 @@ static int ufs_qcom_apply_dev_quirks(struct ufs_hba *hba)
 	spin_lock_irqsave(hba->host->host_lock, flags);
 	/* Set the rpm auto suspend delay to 3s */
 	hba->host->hostt->rpm_autosuspend_delay = UFS_QCOM_AUTO_SUSPEND_DELAY;
-	/* Set the default auto-hiberate idle timer value to 5ms */
-	hba->ahit = FIELD_PREP(UFSHCI_AHIBERN8_TIMER_MASK, 5) |
+	/* Set the default auto-hiberate idle timer value to 2ms */
+	hba->ahit = FIELD_PREP(UFSHCI_AHIBERN8_TIMER_MASK, 2) |
 		    FIELD_PREP(UFSHCI_AHIBERN8_SCALE_MASK, 3);
 	/* Set the clock gating delay to performance mode */
 	hba->clk_gating.delay_ms = UFS_QCOM_CLK_GATING_DELAY_MS_PERF;
@@ -1946,6 +1971,19 @@ static int ufs_qcom_apply_dev_quirks(struct ufs_hba *hba)
 
 	if (hba->dev_info.wmanufacturerid == UFS_VENDOR_MICRON)
 		hba->dev_quirks |= UFS_DEVICE_QUIRK_DELAY_BEFORE_LPM;
+
+#if IS_ENABLED(CONFIG_SEC_UFS_FEATURE)
+	/* check only at the first init */
+	if (!(hba->eh_flags || hba->pm_op_in_progress)) {
+		/* sec special features */
+		ufs_set_sec_features(hba);
+
+#if IS_ENABLED(CONFIG_SCSI_UFS_TEST_MODE)
+		dev_info(hba->dev, "UFS test mode enabled\n");
+#endif
+	}
+	ufs_sec_feature_config(hba);
+#endif
 
 	return err;
 }
@@ -2011,7 +2049,9 @@ static void ufs_qcom_set_caps(struct ufs_hba *hba)
 		UFSHCD_CAP_HIBERN8_WITH_CLK_GATING |
 		UFSHCD_CAP_CLK_SCALING | UFSHCD_CAP_AUTO_BKOPS_SUSPEND |
 		UFSHCD_CAP_RPM_AUTOSUSPEND;
+#if !IS_ENABLED(CONFIG_SEC_UFS_FEATURE)
 		hba->caps |= UFSHCD_CAP_WB_EN;
+#endif
 		hba->caps |= UFSHCD_CAP_AGGR_POWER_COLLAPSE;
 	}
 
@@ -2831,8 +2871,8 @@ static int ufs_qcom_set_cur_therm_state(struct thermal_cooling_device *tcd,
 	switch (data) {
 	case UFS_QCOM_LVL_NO_THERM:
 		dev_warn(tcd->devdata, "UFS host thermal mitigation stops\n");
-		/* Set the default auto-hiberate idle timer to 5 ms */
-		ufshcd_auto_hibern8_update(hba, ufs_qcom_us_to_ahit(5000));
+		/* Set the default auto-hiberate idle timer to 2 ms */
+		ufshcd_auto_hibern8_update(hba, ufs_qcom_us_to_ahit(2000));
 
 		/* Set the default auto suspend delay to 3000 ms */
 		shost_for_each_device(sdev, hba->host)
@@ -2842,8 +2882,8 @@ static int ufs_qcom_set_cur_therm_state(struct thermal_cooling_device *tcd,
 	case UFS_QCOM_LVL_AGGR_THERM:
 	case UFS_QCOM_LVL_MAX_THERM:
 		dev_warn(tcd->devdata, "Going into UFS host thermal mitigation state, performance may be impacted before UFS host thermal mitigation stops\n");
-		/* Set the default auto-hiberate idle timer to 1 ms */
-		ufshcd_auto_hibern8_update(hba, ufs_qcom_us_to_ahit(1000));
+		/* Set the default auto-hiberate idle timer to 2 ms */
+		ufshcd_auto_hibern8_update(hba, ufs_qcom_us_to_ahit(2000));
 
 		/* Set the default auto suspend delay to 100 ms */
 		shost_for_each_device(sdev, hba->host)
@@ -3602,6 +3642,10 @@ static void ufs_qcom_dump_dbg_regs(struct ufs_hba *hba)
 		ufs_qcom_phy_dbg_register_dump(phy);
 	}
 
+#if IS_ENABLED(CONFIG_SCSI_UFS_TEST_MODE)
+	/* do not recover system if test mode is enabled */
+	BUG_ON(1);
+#endif
 	BUG_ON(host->crash_on_err);
 }
 
@@ -3667,6 +3711,17 @@ static int ufs_qcom_device_reset(struct ufs_hba *hba)
 {
 	struct ufs_qcom_host *host = ufshcd_get_variant(hba);
 
+	/* guarantee device internal cache flush */
+	if (hba->eh_flags && !host->skip_flush) {
+		dev_info(hba->dev, "%s: Waiting for device internal cache flush\n",
+				__func__);
+		ssleep(2);
+		host->skip_flush = true;
+#if IS_ENABLED(CONFIG_SEC_UFS_FEATURE)
+		ufs_sec_check_hwrst_cnt();
+#endif
+	}
+
 	/* reset gpio is optional */
 	if (!host->device_reset)
 		return -EOPNOTSUPP;
@@ -3695,8 +3750,9 @@ static void ufs_qcom_config_scaling_param(struct ufs_hba *hba,
 
 	d = (struct devfreq_simple_ondemand_data *)data;
 	p->polling_ms = 60;
+	p->timer = DEVFREQ_TIMER_DELAYED;
 	d->upthreshold = 70;
-	d->downdifferential = 5;
+	d->downdifferential = 65;
 }
 
 static struct ufs_dev_fix ufs_qcom_dev_fixups[] = {
@@ -3716,6 +3772,12 @@ static void ufs_qcom_fixup_dev_quirks(struct ufs_hba *hba)
 	ufshcd_fixup_dev_quirks(hba, ufs_qcom_dev_fixups);
 }
 
+static void ufs_qcom_event_notify(struct ufs_hba *hba, enum ufs_event_type evt, void *data)
+{
+#if IS_ENABLED(CONFIG_SEC_UFS_FEATURE)
+	ufs_sec_check_op_err(hba, evt, data);
+#endif
+}
 /*
  * struct ufs_hba_qcom_vops - UFS QCOM specific variant operations
  *
@@ -3741,6 +3803,7 @@ static const struct ufs_hba_variant_ops ufs_hba_qcom_vops = {
 	.setup_xfer_req         = ufs_qcom_qos,
 	.program_key		= ufs_qcom_ice_program_key,
 	.fixup_dev_quirks       = ufs_qcom_fixup_dev_quirks,
+	.event_notify		= ufs_qcom_event_notify,
 };
 
 /**
@@ -4043,6 +4106,10 @@ static void ufs_qcom_register_hooks(void)
 				ufs_qcom_hook_send_tm_command, NULL);
 	register_trace_android_vh_ufs_check_int_errors(
 				ufs_qcom_hook_check_int_errors, NULL);
+#if IS_ENABLED(CONFIG_SEC_UFS_FEATURE)
+	/* register vendor hooks */
+	ufs_sec_register_vendor_hooks();
+#endif
 }
 
 
@@ -4099,6 +4166,7 @@ static int ufs_qcom_probe(struct platform_device *pdev)
 		dev_err(dev, "ufshcd_pltfrm_init() failed %d\n", err);
 
 	ufs_qcom_register_hooks();
+
 	return err;
 }
 
@@ -4119,6 +4187,9 @@ static int ufs_qcom_remove(struct platform_device *pdev)
 	pm_runtime_get_sync(&(pdev)->dev);
 	for (i = 0; i < r->num_groups; i++, qcg++)
 		remove_group_qos(qcg);
+#if IS_ENABLED(CONFIG_SEC_UFS_FEATURE)
+	ufs_remove_sec_features(hba);
+#endif
 	ufshcd_remove(hba);
 	return 0;
 }
@@ -4139,6 +4210,10 @@ static void ufs_qcom_shutdown(struct platform_device *pdev)
 			scsi_remove_device(sdev);
 	}
 	ufshcd_shutdown(hba);
+
+#if IS_ENABLED(CONFIG_SEC_UFS_FEATURE)
+	ufs_sec_print_err_info(hba);
+#endif
 }
 
 static const struct of_device_id ufs_qcom_of_match[] = {
