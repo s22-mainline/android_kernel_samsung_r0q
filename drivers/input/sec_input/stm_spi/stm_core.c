@@ -1957,6 +1957,10 @@ int stm_ts_input_open(struct input_dev *dev)
 	u8 data[2] = { 0 };
 	int retrycnt = 0;
 
+	if (!ts->probe_done) {
+		input_err(true, &ts->client->dev, "%s: device probe is not done\n", __func__);
+		return 0;
+	}
 	cancel_delayed_work_sync(&ts->work_read_info);
 
 	mutex_lock(&ts->modechange);
@@ -2023,6 +2027,10 @@ void stm_ts_input_close(struct input_dev *dev)
 {
 	struct stm_ts_data *ts = input_get_drvdata(dev);
 
+	if (!ts->probe_done) {
+		input_err(true, &ts->client->dev, "%s: device probe is not done\n", __func__);
+		return;
+	}
 	cancel_delayed_work_sync(&ts->work_read_info);
 
 	if (ts->plat_data->shutdown_called) {

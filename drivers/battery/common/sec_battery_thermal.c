@@ -858,8 +858,8 @@ void sec_bat_thermal_check(struct sec_battery_info *battery)
 		sec_vote(battery->fcc_vote, VOTER_SWELLING, false, 0);
 		sec_vote(battery->fv_vote, VOTER_SWELLING, false, 0);
 		sec_vote(battery->chgen_vote, VOTER_SWELLING, false, 0);
-		sec_vote(battery->chgen_vote, VOTER_CHANGE_CHGMODE, false, SEC_BAT_CHG_MODE_UNO_ONLY);
-		sec_vote(battery->iv_vote, VOTER_CHANGE_CHGMODE, false, SEC_INPUT_VOLTAGE_5V);
+		sec_vote(battery->chgen_vote, VOTER_CHANGE_CHGMODE, false, 0);
+		sec_vote(battery->iv_vote, VOTER_CHANGE_CHGMODE, false, 0);
 		sec_bat_set_current_event(battery, 0, SEC_BAT_CURRENT_EVENT_SWELLING_MODE);
 		sec_bat_set_threshold(battery, battery->cable_type);
 		return;
@@ -965,13 +965,13 @@ void sec_bat_thermal_check(struct sec_battery_info *battery)
 #if defined(CONFIG_WIRELESS_TX_MODE)
 				if (get_sec_vote_result(battery->iv_vote) > SEC_INPUT_VOLTAGE_5V) {
 					sec_vote(battery->iv_vote, VOTER_CHANGE_CHGMODE, true, SEC_INPUT_VOLTAGE_5V);
-					sec_vote(battery->chgen_vote, VOTER_CHANGE_CHGMODE, true, SEC_BAT_CHG_MODE_UNO_ONLY);
+					sec_vote(battery->chgen_vote, VOTER_CHANGE_CHGMODE, true, SEC_BAT_CHG_MODE_NOT_SET);
 				}
 #endif
 				sec_vote(battery->chgen_vote, VOTER_SWELLING, true, SEC_BAT_CHG_MODE_BUCK_OFF);
 			} else {
 				sec_vote(battery->chgen_vote, VOTER_SWELLING, true, SEC_BAT_CHG_MODE_CHARGING_OFF);
-				sec_vote(battery->iv_vote, VOTER_CHANGE_CHGMODE, false, SEC_INPUT_VOLTAGE_5V);
+				sec_vote(battery->iv_vote, VOTER_CHANGE_CHGMODE, false, 0);
 			}
 			sec_bat_set_health(battery, POWER_SUPPLY_HEALTH_OVERHEAT);
 			sec_bat_set_charging_status(battery, POWER_SUPPLY_STATUS_NOT_CHARGING);
@@ -1019,7 +1019,7 @@ void sec_bat_thermal_check(struct sec_battery_info *battery)
 			}
 			sec_vote(battery->fv_vote, VOTER_SWELLING, true, battery->pdata->high_temp_float);
 			sec_vote(battery->topoff_vote, VOTER_SWELLING, true, battery->pdata->full_check_current_2nd);
-			sec_vote(battery->iv_vote, VOTER_CHANGE_CHGMODE, false, SEC_INPUT_VOLTAGE_5V);
+			sec_vote(battery->iv_vote, VOTER_CHANGE_CHGMODE, false, 0);
 
 			sec_bat_set_health(battery, POWER_SUPPLY_HEALTH_GOOD);
 			store_battery_log(
@@ -1039,7 +1039,7 @@ void sec_bat_thermal_check(struct sec_battery_info *battery)
 			sec_vote(battery->fv_vote, VOTER_SWELLING, true, battery->pdata->low_temp_float);
 			sec_vote(battery->topoff_vote, VOTER_SWELLING, false, 0);
 			sec_vote(battery->chgen_vote, VOTER_SWELLING, true, SEC_BAT_CHG_MODE_CHARGING);
-			sec_vote(battery->iv_vote, VOTER_CHANGE_CHGMODE, false, SEC_INPUT_VOLTAGE_5V);
+			sec_vote(battery->iv_vote, VOTER_CHANGE_CHGMODE, false, 0);
 			sec_bat_set_health(battery, POWER_SUPPLY_HEALTH_GOOD);
 			store_battery_log(
 				"THM_C1:SOC(%d),Vnow(%d),tbat(%d),ct(%d)",
@@ -1058,7 +1058,7 @@ void sec_bat_thermal_check(struct sec_battery_info *battery)
 			sec_vote(battery->fv_vote, VOTER_SWELLING, true, battery->pdata->low_temp_float);
 			sec_vote(battery->topoff_vote, VOTER_SWELLING, false, 0);
 			sec_vote(battery->chgen_vote, VOTER_SWELLING, true, SEC_BAT_CHG_MODE_CHARGING);
-			sec_vote(battery->iv_vote, VOTER_CHANGE_CHGMODE, false, SEC_INPUT_VOLTAGE_5V);
+			sec_vote(battery->iv_vote, VOTER_CHANGE_CHGMODE, false, 0);
 			sec_bat_set_health(battery, POWER_SUPPLY_HEALTH_GOOD);
 			store_battery_log(
 				"THM_C2:SOC(%d),Vnow(%d),tbat(%d),ct(%d)",
@@ -1077,7 +1077,7 @@ void sec_bat_thermal_check(struct sec_battery_info *battery)
 			sec_vote(battery->fv_vote, VOTER_SWELLING, true, battery->pdata->low_temp_cool3_float);
 			sec_vote(battery->topoff_vote, VOTER_SWELLING, true, battery->pdata->full_check_current_2nd);
 			sec_vote(battery->chgen_vote, VOTER_SWELLING, true, SEC_BAT_CHG_MODE_CHARGING);
-			sec_vote(battery->iv_vote, VOTER_CHANGE_CHGMODE, false, SEC_INPUT_VOLTAGE_5V);
+			sec_vote(battery->iv_vote, VOTER_CHANGE_CHGMODE, false, 0);
 			sec_bat_set_health(battery, POWER_SUPPLY_HEALTH_GOOD);
 			store_battery_log(
 				"THM_C3:SOC(%d),Vnow(%d),tbat(%d),ct(%d)",
@@ -1089,7 +1089,7 @@ void sec_bat_thermal_check(struct sec_battery_info *battery)
 			sec_bat_set_current_event(battery, SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING_COOL3,
 				SEC_BAT_CURRENT_EVENT_SWELLING_MODE);
 			sec_vote(battery->chgen_vote, VOTER_SWELLING, true, SEC_BAT_CHG_MODE_CHARGING_OFF);
-			sec_vote(battery->iv_vote, VOTER_CHANGE_CHGMODE, false, SEC_INPUT_VOLTAGE_5V);
+			sec_vote(battery->iv_vote, VOTER_CHANGE_CHGMODE, false, 0);
 			sec_bat_set_health(battery, POWER_SUPPLY_HEALTH_COLD);
 			sec_bat_set_charging_status(battery, POWER_SUPPLY_STATUS_NOT_CHARGING);
 #if defined(CONFIG_BATTERY_CISD)
@@ -1108,7 +1108,7 @@ void sec_bat_thermal_check(struct sec_battery_info *battery)
 			sec_vote(battery->fv_vote, VOTER_SWELLING, false, 0);
 			sec_vote(battery->topoff_vote, VOTER_SWELLING, false, 0);
 			sec_vote(battery->chgen_vote, VOTER_SWELLING, false, 0);
-			sec_vote(battery->iv_vote, VOTER_CHANGE_CHGMODE, false, SEC_INPUT_VOLTAGE_5V);
+			sec_vote(battery->iv_vote, VOTER_CHANGE_CHGMODE, false, 0);
 			sec_bat_set_health(battery, POWER_SUPPLY_HEALTH_GOOD);
 			store_battery_log(
 				"THM_N:SOC(%d),Vnow(%d),tbat(%d),ct(%d)",

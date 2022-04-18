@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2006-2021 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2016-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #define pr_fmt(fmt)     KBUILD_MODNAME ":%s() " fmt, __func__
@@ -55,7 +55,7 @@ static int __rdx_bootdev_parse_dt_memory_region(struct builder *bd,
 	return 0;
 }
 
-static struct dt_builder __rdx_bootdev_dt_builder[] = {
+static const struct dt_builder __rdx_bootdev_dt_builder[] = {
 	DT_BUILDER(__rdx_bootdev_parse_dt_memory_region),
 };
 
@@ -68,7 +68,7 @@ static int __rdx_bootdev_parse_dt(struct builder *bd)
 #if IS_BUILTIN(CONFIG_SEC_QC_RDX_BOOTDEV)
 static __always_inline unsigned long __free_reserved_area(void *start, void *end, int poison, const char *s)
 {
-	free_reserved_area(start, end, poison, s);
+	return free_reserved_area(start, end, poison, s);
 }
 #else
 /* FIXME: this is a copy of 'free_reserved_area' of 'page_alloc.c' */
@@ -313,7 +313,7 @@ static int __rdx_bootdev_remove(struct platform_device *pdev,
 	return 0;
 }
 
-static struct dev_builder __rdx_bootdev_dev_builder[] = {
+static const struct dev_builder __rdx_bootdev_dev_builder[] = {
 	DEVICE_BUILDER(__rdx_bootdev_parse_dt, NULL),
 	DEVICE_BUILDER(__rdx_bootdev_test_sec_debug, NULL),
 	DEVICE_BUILDER(__rdx_bootdev_proc_init,

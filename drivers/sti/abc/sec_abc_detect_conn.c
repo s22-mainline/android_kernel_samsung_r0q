@@ -365,110 +365,148 @@ __visible_for_testing ssize_t available_pins_show(struct device *dev,
 }
 static DEVICE_ATTR_RO(available_pins);
 
+/**
+ * Fill out the gpio cnt
+ */
+static void fill_gpio_cnt(struct sec_det_conn_p_data *pdata, struct device_node *np, char *gpio_name)
+{
+	int gpio_name_cnt;
+
+	gpio_name_cnt = of_gpio_named_count(np, gpio_name);
+	if (gpio_name_cnt < 1) {
+		SEC_CONN_PRINT("fill gpio cnt failed %s < 1 %d.\n",
+			       gpio_name,
+			       gpio_name_cnt);
+		gpio_name_cnt = 0;
+	}
+	pdata->gpio_last_cnt = pdata->gpio_total_cnt;
+	pdata->gpio_total_cnt = pdata->gpio_total_cnt + gpio_name_cnt;
+	SEC_CONN_PRINT("fill out %s gpio cnt, gpio_total_count = %d", gpio_name, pdata->gpio_total_cnt);
+}
+
+/**
+ * Fill out the gpio name
+ */
+static void fill_gpio_name(struct sec_det_conn_p_data *pdata,
+			   struct device_node *np,
+			   char *conn_name,
+			   int offset,
+			   int index)
+{
+	/*Get connector name*/
+	of_property_read_string_index(np, conn_name, offset, &pdata->name[index]);
+}
+
+/**
+ * Fill out the irq info
+ */
+static int fill_irq_info(struct sec_det_conn_p_data *pdata,
+			 struct device_node *np,
+			 char *gpio_name,
+			 int offset,
+			 int index)
+{
+	/* get connector gpio number*/
+	pdata->irq_gpio[index] = of_get_named_gpio(np, gpio_name, offset);
+
+	if (!gpio_is_valid(pdata->irq_gpio[index])) {
+		SEC_CONN_PRINT("[%s] gpio[%d] is not valid\n", gpio_name, offset);
+		return 0;
+	}
+	pdata->irq_number[index] = gpio_to_irq(pdata->irq_gpio[index]);
+	pdata->irq_type[index] = IRQ_TYPE_EDGE_BOTH;
+	SEC_CONN_PRINT("i = %d, irq_gpio[i] = %d, irq_num[i] = %d, level = %d\n", index,
+		       pdata->irq_gpio[index],
+		       pdata->irq_number[index],
+		       gpio_get_value(pdata->irq_gpio[index]));
+	return 1;
+}
+
+/**
+ * Parse the AP device tree and get gpio number, irq type.
+ * Request gpio
+ */
+static void parse_ap_dt(struct sec_det_conn_p_data *pdata, struct device_node *np)
+{
+	int i;
+
+	fill_gpio_cnt(pdata, np, "sec,det_conn_gpios");
+
+	for (i = pdata->gpio_last_cnt; i < pdata->gpio_total_cnt; i++) {
+		fill_gpio_name(pdata, np, "sec,det_conn_name", i - pdata->gpio_last_cnt, i);
+		if (!fill_irq_info(pdata, np, "sec,det_conn_gpios", i - pdata->gpio_last_cnt, i))
+			break;
+	}
+}
+
+#if IS_ENABLED(CONFIG_QCOM_SEC_ABC_DETECT)
+/**
+ * gpio pinctrl by pinctrl-name
+ */
+static void set_pinctrl_by_pinctrl_name(struct device *dev, char *pinctrl_name)
+{
+	struct pinctrl *conn_pinctrl;
+
+	conn_pinctrl = devm_pinctrl_get_select(dev, pinctrl_name);
+	if (IS_ERR_OR_NULL(conn_pinctrl))
+		SEC_CONN_PRINT("%s detect_pinctrl_init failed.\n", pinctrl_name);
+	else
+		SEC_CONN_PRINT("%s detect_pinctrl_init passed.\n", pinctrl_name);
+}
+
+/**
+ * Parse the Expander device tree and get gpio number, irq type.
+ * Request gpio
+ */
+static void parse_exp_dt(struct sec_det_conn_p_data *pdata, struct device_node *np)
+{
+	int i;
+
+	fill_gpio_cnt(pdata, np, "sec,det_exp_conn_gpios");
+
+	for (i = pdata->gpio_last_cnt; i < pdata->gpio_total_cnt; i++) {
+		fill_gpio_name(pdata, np, "sec,det_exp_conn_name", i - pdata->gpio_last_cnt, i);
+		if (!fill_irq_info(pdata, np, "sec,det_exp_conn_gpios", i - pdata->gpio_last_cnt, i))
+			break;
+	}
+}
+
+/**
+ * Parse the PM device tree and get gpio number, irq type.
+ * Request gpio
+ */
+static void parse_pmic_dt(struct sec_det_conn_p_data *pdata, struct device_node *np)
+{
+	int i;
+
+	fill_gpio_cnt(pdata, np, "sec,det_pm_conn_gpios");
+
+	for (i = pdata->gpio_last_cnt; i < pdata->gpio_total_cnt; i++) {
+		fill_gpio_name(pdata, np, "sec,det_pm_conn_name", i - pdata->gpio_last_cnt, i);
+		if (!fill_irq_info(pdata, np, "sec,det_pm_conn_gpios", i - pdata->gpio_last_cnt, i))
+			break;
+	}
+}
+#endif
+
 #if IS_ENABLED(CONFIG_OF)
 /**
  * Parse the device tree and get gpio number, irq type.
  * Request gpio
  */
-static int detect_conn_parse_dt(struct device *dev)
+static int parse_detect_conn_dt(struct device *dev)
 {
 	struct sec_det_conn_p_data *pdata = dev->platform_data;
 	struct device_node *np = dev->of_node;
 #if IS_ENABLED(CONFIG_QCOM_SEC_ABC_DETECT)
-	struct pinctrl *conn_pinctrl;
-	struct pinctrl *pm_conn_pinctrl;
+	set_pinctrl_by_pinctrl_name(dev, "det_ap_connect");
 #endif
-	int i;
-
-	pdata->gpio_cnt = of_gpio_named_count(np, "sec,det_conn_gpios");
-
-	/* if support gpio cnt less than 1 set value to 0 */
-	if (pdata->gpio_cnt < 1) {
-		SEC_CONN_PRINT("detect_pinctrl_init failed gpio_cnt < 1 %d.\n",
-			       pdata->gpio_cnt);
-		pdata->gpio_cnt = 0;
-	}
-
-	pdata->gpio_total_cnt = pdata->gpio_cnt;
-
+	parse_ap_dt(pdata, np);
 #if IS_ENABLED(CONFIG_QCOM_SEC_ABC_DETECT)
-	/* Setting pinctrl state to NO PULL */
-	conn_pinctrl = devm_pinctrl_get_select(dev, "det_ap_connect");
-	if (IS_ERR_OR_NULL(conn_pinctrl))
-		SEC_CONN_PRINT("detect_pinctrl_init failed.\n");
-#endif
-	for (i = 0; i < pdata->gpio_cnt; i++) {
-		/* get connector name*/
-		of_property_read_string_index(np, "sec,det_conn_name",
-					      i, &pdata->name[i]);
-
-		/* get connector gpio number*/
-		pdata->irq_gpio[i] = of_get_named_gpio(np, "sec,det_conn_gpios",
-						       i);
-
-		if (!gpio_is_valid(pdata->irq_gpio[i])) {
-			dev_err(dev, "%s: Failed to get irq gpio.\n", __func__);
-			return -EINVAL;
-		}
-		/* added gpio init feature to support interrupt configuration */
-		/* set default irq type to both edge */
-		pdata->irq_type[i] = IRQ_TYPE_EDGE_BOTH;
-
-		/* filling the irq_number from this gpio.*/
-		pdata->irq_number[i] = gpio_to_irq(pdata->irq_gpio[i]);
-
-		/* print out current sec detect gpio status */
-		SEC_CONN_PRINT("i = [%d] gpio [%d] level %d\n", i,
-			       pdata->irq_gpio[i],
-			       gpio_get_value(pdata->irq_gpio[i]));
-		SEC_CONN_PRINT("i = [%d] gpio [%d] to irq [%d]\n", i,
-			       pdata->irq_gpio[i],
-			       pdata->irq_number[i]);
-	}
-
-#if IS_ENABLED(CONFIG_QCOM_SEC_ABC_DETECT)
-	/* Setting PM gpio for QC */
-	pdata->gpio_pm_cnt = of_gpio_named_count(np, "sec,det_pm_conn_gpios");
-
-	if (pdata->gpio_pm_cnt < 1) {
-		SEC_CONN_PRINT("pm detect_pinctrl_init failed pm cnt < 1. %d\n",
-			       pdata->gpio_pm_cnt);
-		pdata->gpio_pm_cnt = 0;
-	}
-
-	pdata->gpio_total_cnt = pdata->gpio_total_cnt + pdata->gpio_pm_cnt;
-
-	/* Setting pinctrl state to NO PULL */
-	pm_conn_pinctrl = devm_pinctrl_get_select(dev, "det_pm_connect");
-	if (IS_ERR_OR_NULL(pm_conn_pinctrl))
-		SEC_CONN_PRINT("pm detect_pinctrl_init failed.\n");
-
-	SEC_CONN_PRINT("gpio_total_count = %d", pdata->gpio_total_cnt);
-
-	for (i = pdata->gpio_cnt; i < pdata->gpio_total_cnt; i++) {
-		/*Get connector name*/
-		of_property_read_string_index(np, "sec,det_pm_conn_name",
-					      i - pdata->gpio_cnt,
-					      &pdata->name[i]);
-
-		/*Get connector gpio number*/
-		pdata->irq_gpio[i] = of_get_named_gpio(np,
-						       "sec,det_pm_conn_gpios",
-						       i - pdata->gpio_cnt);
-		if (!gpio_is_valid(pdata->irq_gpio[i])) {
-			SEC_CONN_PRINT("pm gpio[%d] invalid\n",
-				       i - pdata->gpio_cnt);
-			return -EINVAL;
-		}
-		pdata->irq_number[i] = gpio_to_irq(pdata->irq_gpio[i]);
-		pdata->irq_type[i] = IRQ_TYPE_EDGE_BOTH;
-		SEC_CONN_PRINT("i = [%d] gpio [%d] level %d\n", i,
-			       pdata->irq_gpio[i],
-			       gpio_get_value(pdata->irq_gpio[i]));
-		SEC_CONN_PRINT("i = [%d] gpio [%d] to irq [%d]\n", i,
-			       pdata->irq_gpio[i],
-			       pdata->irq_number[i]);
-	}
+	set_pinctrl_by_pinctrl_name(dev, "det_exp_connect");
+	parse_exp_dt(pdata, np);
+	set_pinctrl_by_pinctrl_name(dev, "det_pm_connect");
+	parse_pmic_dt(pdata, np);
 #endif
 	return 0;
 }
@@ -496,7 +534,7 @@ static int sec_abc_detect_conn_probe(struct platform_device *pdev)
 		pdev->dev.platform_data = pdata;
 
 #if IS_ENABLED(CONFIG_OF)
-		ret = detect_conn_parse_dt(&pdev->dev);
+		ret = parse_detect_conn_dt(&pdev->dev);
 #endif
 		if (ret) {
 			dev_err(&pdev->dev, "Failed to parse dt data.\n");

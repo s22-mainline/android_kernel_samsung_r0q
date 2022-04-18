@@ -9,6 +9,7 @@
 struct qc_debug_drvdata {
 	struct builder bd;
 	struct notifier_block reboot_nb;
+	bool use_cp_dump_encrypt;
 	bool use_store_last_kmsg;
 	bool use_store_lpm_kmsg;
 	bool use_store_onoff_history;
@@ -30,5 +31,8 @@ extern void sec_qc_force_err_exit(struct builder *bd);
 /* sec_qc_boot_stat.c */
 extern int sec_qc_boot_stat_init(struct builder *bd);
 extern void sec_qc_boot_stat_exit(struct builder *bd);
+
+/* sec_qc_cp_dump_encrypt.c */
+extern int sec_qc_cp_dump_encrypt_init(struct builder *bd);
 
 #endif /* __INTERNAL__SEC_QC_LOG_BUF_H__ */

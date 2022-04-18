@@ -98,6 +98,20 @@ int muic_check_usb_killer(struct if_cb_manager *man_core)
 }
 EXPORT_SYMBOL(muic_check_usb_killer);
 
+void muic_set_bc12(struct if_cb_manager *man_core, int enable)
+{
+	if (man_core == NULL || man_core->muic_d == NULL ||
+			man_core->muic_d->ops == NULL ||
+			man_core->muic_d->ops->muic_set_bc12 == NULL) {
+		pr_err("%s : Member of if_cb_manager is NULL\n", __func__);
+		return;
+	}
+
+	man_core->muic_d->ops->muic_set_bc12(
+			man_core->muic_d->data, enable);
+}
+EXPORT_SYMBOL(muic_set_bc12);
+
 int usbpd_sbu_test_read(struct if_cb_manager *man_core)
 {
 	if (man_core == NULL || man_core->usbpd_d == NULL ||

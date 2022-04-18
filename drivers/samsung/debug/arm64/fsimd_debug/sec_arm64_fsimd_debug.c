@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2019-2020 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2019-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #define pr_fmt(fmt)     KBUILD_MODNAME ":%s() " fmt, __func__
@@ -32,7 +32,7 @@ static int __fsimd_debug_parse_dt_check_debug_level(struct builder *bd,
 
 	nr_dbg_level = of_property_count_u32_elems(np, "sec,debug_level");
 	if (nr_dbg_level <= 0) {
-		dev_warn(dev, "this crashkey_dev (%s) will be enabled all sec debug levels!\n",
+		dev_warn(dev, "%s will be enabled all sec debug levels!\n",
 				dev_name(dev));
 		return 0;
 	}
@@ -48,7 +48,7 @@ static int __fsimd_debug_parse_dt_check_debug_level(struct builder *bd,
 	return -ENODEV;
 }
 
-static struct dt_builder __fsimd_debug_dt_builder[] = {
+static const struct dt_builder __fsimd_debug_dt_builder[] = {
 	DT_BUILDER(__fsimd_debug_parse_dt_check_debug_level),
 };
 
@@ -186,7 +186,12 @@ static struct force_err_handle __fsimd_force_error =
 
 static int __fsimd_debug_add_force_err(struct builder *bd)
 {
-	return sec_force_err_add_custom_handle(&__fsimd_force_error);
+	int err = sec_force_err_add_custom_handle(&__fsimd_force_error);
+
+	if (err < 0)
+		dev_warn(bd->dev, "force err is disabled. ignored.\n");
+
+	return 0;
 }
 
 static void __fsimd_debug_del_force_err(struct builder *bd)
@@ -194,7 +199,7 @@ static void __fsimd_debug_del_force_err(struct builder *bd)
 	sec_force_err_del_custom_handle(&__fsimd_force_error);
 }
 
-static struct dev_builder __fsimd_debug_dev_builder[] = {
+static const struct dev_builder __fsimd_debug_dev_builder[] = {
 	DEVICE_BUILDER(__fsimd_debug_parse_dt, NULL),
 	DEVICE_BUILDER(__fsimd_debug_init_random_pi_work, NULL),
 	DEVICE_BUILDER(__fsimd_debug_install_vendor_hook,

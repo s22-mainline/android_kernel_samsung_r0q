@@ -459,7 +459,7 @@ static ssize_t muic_sysfs_vbus_value_show(struct device *dev,
 	return sprintf(buf, "%d\n", val);
 }
 
-#if IS_ENABLED(CONFIG_HV_MUIC_VOLTAGE_CTRL)
+#if IS_ENABLED(CONFIG_MUIC_HV)
 static ssize_t muic_sysfs_afc_disable_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -549,7 +549,7 @@ static ssize_t muic_sysfs_set_afc_set_voltage(struct device *dev,
 	pr_info("%s ret=%d-\n", __func__, ret);
 	return count;
 }
-#endif /* CONFIG_HV_MUIC_VOLTAGE_CTRL */
+#endif /* CONFIG_MUIC_HV */
 
 #if IS_ENABLED(CONFIG_HICCUP_CHARGER)
 static ssize_t hiccup_show(struct device *dev,
@@ -616,12 +616,12 @@ static DEVICE_ATTR(apo_factory, 0664,
 		muic_sysfs_apo_factory_show,
 		muic_sysfs_set_apo_factory);
 static DEVICE_ATTR(vbus_value, 0444, muic_sysfs_vbus_value_show, NULL);
-#if IS_ENABLED(CONFIG_HV_MUIC_VOLTAGE_CTRL)
+#if IS_ENABLED(CONFIG_MUIC_HV)
 static DEVICE_ATTR(afc_disable, 0664,
 		muic_sysfs_afc_disable_show, muic_sysfs_set_afc_disable);
 static DEVICE_ATTR(afc_set_voltage, 0220,
 		NULL, muic_sysfs_set_afc_set_voltage);
-#endif /* CONFIG_HV_MUIC_VOLTAGE_CTRL */
+#endif /* CONFIG_MUIC_HV */
 #if IS_ENABLED(CONFIG_HICCUP_CHARGER)
 static DEVICE_ATTR_RW(hiccup);
 #endif /* CONFIG_HICCUP_CHARGER */
@@ -645,10 +645,10 @@ static struct attribute *muic_sysfs_attributes[] = {
 	&dev_attr_audio_path.attr,
 	&dev_attr_apo_factory.attr,
 	&dev_attr_vbus_value.attr,
-#if IS_ENABLED(CONFIG_HV_MUIC_VOLTAGE_CTRL)
+#if IS_ENABLED(CONFIG_MUIC_HV)
 	&dev_attr_afc_disable.attr,
 	&dev_attr_afc_set_voltage.attr,
-#endif /* CONFIG_HV_MUIC_VOLTAGE_CTRL */
+#endif /* CONFIG_MUIC_HV */
 #if IS_ENABLED(CONFIG_HICCUP_CHARGER)
 	&dev_attr_hiccup.attr,
 #endif /* CONFIG_HICCUP_CHARGER */

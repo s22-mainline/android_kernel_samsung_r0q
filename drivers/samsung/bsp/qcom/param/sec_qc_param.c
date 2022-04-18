@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2011-2021 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2011-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #define pr_fmt(fmt)     KBUILD_MODNAME ":%s() " fmt, __func__
@@ -413,7 +413,7 @@ static int __qc_param_parse_dt_negative_offset(struct builder *bd,
 	return 0;
 }
 
-static struct dt_builder __qc_param_dt_builder[] = {
+static const struct dt_builder __qc_param_dt_builder[] = {
 	DT_BUILDER(__qc_param_parse_dt_bdev_path),
 	DT_BUILDER(__qc_param_parse_dt_negative_offset),
 };
@@ -687,7 +687,7 @@ static void __qc_param_remove_prolog(struct builder *bd)
 }
 
 static int __qc_param_probe(struct platform_device *pdev,
-		struct dev_builder *builder, ssize_t n)
+		const struct dev_builder *builder, ssize_t n)
 {
 	struct device *dev = &pdev->dev;
 	struct qc_param_drvdata *drvdata;
@@ -702,7 +702,7 @@ static int __qc_param_probe(struct platform_device *pdev,
 }
 
 static int __qc_param_remove(struct platform_device *pdev,
-		struct dev_builder *builder, ssize_t n)
+		const struct dev_builder *builder, ssize_t n)
 {
 	struct qc_param_drvdata *drvdata = platform_get_drvdata(pdev);
 
@@ -784,7 +784,7 @@ static int __qc_param_debugfs_create(struct builder *bd) { return 0; }
 static void __qc_param_debugfs_remove(struct builder *bd) {}
 #endif
 
-static struct dev_builder __qc_param_dev_builder[] = {
+static const struct dev_builder __qc_param_dev_builder[] = {
 	DEVICE_BUILDER(__qc_param_parse_dt, NULL),
 	DEVICE_BUILDER(__qc_param_sec_class_create,
 		       __qc_param_sec_class_remove),

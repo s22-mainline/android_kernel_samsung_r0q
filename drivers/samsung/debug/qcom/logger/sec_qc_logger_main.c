@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2020 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2020-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #define pr_fmt(fmt)     KBUILD_MODNAME ":%s() " fmt, __func__
@@ -12,20 +12,35 @@
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/sched.h>
+#include <linux/sched/clock.h>
 
 #include <linux/samsung/builder_pattern.h>
 #include <linux/samsung/debug/sec_debug_region.h>
 
 #include "sec_qc_logger.h"
 
+u64 notrace __qc_logger_cpu_clock(int cpu)
+{
+	static DEFINE_PER_CPU(u64, __cpu_clock);
+	u64 *last_clk = &per_cpu(__cpu_clock, cpu);
+	u64 curr_clk = cpu_clock(cpu);
+
+	if (unlikely(*last_clk >= curr_clk))
+		curr_clk = ++(*last_clk);
+	else
+		*last_clk = curr_clk;
+
+	return curr_clk;
+}
+
 int __qc_logger_sub_module_probe(struct qc_logger *logger,
-		struct dev_builder *builder, ssize_t n)
+		const struct dev_builder *builder, ssize_t n)
 {
 	return sec_director_probe_dev(&logger->bd, builder, n);
 }
 
 void __qc_logger_sub_module_remove(struct qc_logger *logger,
-		struct dev_builder *builder, ssize_t n)
+		const struct dev_builder *builder, ssize_t n)
 {
 	sec_director_destruct_dev(&logger->bd, builder, n, n);
 }
@@ -55,7 +70,7 @@ static int __qc_logger_parse_dt_unique_id(struct builder *bd,
 	return 0;
 }
 
-static struct dt_builder __qc_logger_dt_builder[] = {
+static const struct dt_builder __qc_logger_dt_builder[] = {
 	DT_BUILDER(__qc_logger_parse_dt_name),
 	DT_BUILDER(__qc_logger_parse_dt_unique_id),
 };
@@ -176,7 +191,7 @@ static int __qc_logger_probe_epilog(struct builder *bd)
 }
 
 static int __qc_logger_probe(struct platform_device *pdev,
-		struct dev_builder *builder, ssize_t n)
+		const struct dev_builder *builder, ssize_t n)
 {
 	struct device *dev = &pdev->dev;
 	struct qc_logger_drvdata *drvdata;
@@ -191,7 +206,7 @@ static int __qc_logger_probe(struct platform_device *pdev,
 }
 
 static int __qc_logger_remove(struct platform_device *pdev,
-		struct dev_builder *builder, ssize_t n)
+		const struct dev_builder *builder, ssize_t n)
 {
 	struct qc_logger_drvdata *drvdata = platform_get_drvdata(pdev);
 
@@ -234,7 +249,7 @@ static int __qc_logger_mock_parse_dt_unique_id(struct builder *bd)
 	return 0;
 }
 
-static struct dev_builder __qc_logger_mock_dev_builder[] = {
+static const struct dev_builder __qc_logger_mock_dev_builder[] = {
 	DEVICE_BUILDER(__qc_logger_mock_parse_dt_name, NULL),
 	DEVICE_BUILDER(__qc_logger_mock_parse_dt_unique_id, NULL),
 	DEVICE_BUILDER(__qc_logger_pick_concrete_logger,
@@ -259,7 +274,7 @@ int kunit_qc_logger_mock_remove(struct platform_device *pdev)
 }
 #endif
 
-static struct dev_builder __qc_logger_dev_builder[] = {
+static const struct dev_builder __qc_logger_dev_builder[] = {
 	DEVICE_BUILDER(__qc_logger_parse_dt, NULL),
 	DEVICE_BUILDER(__qc_logger_pick_concrete_logger,
 		       __qc_logger_unpick_concrete_logger),

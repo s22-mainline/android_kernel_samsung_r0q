@@ -41,7 +41,6 @@
 #if IS_ENABLED(CONFIG_COMBO_REDRIVER_PTN36502)
 #include <linux/combo_redriver/ptn36502.h>
 #endif
-#include <linux/usb/typec/manager/usb_typec_manager_notifier.h>
 
 extern struct max77705_usbc_platform_data *g_usbc_data;
 
@@ -125,7 +124,6 @@ void max77705_ccic_event_work(void *data, int dest, int id, int attach, int even
 				desc.accessory = TYPEC_ACCESSORY_NONE; /* XXX: handle accessories */
 				desc.identity = NULL;
 				usbpd_data->typec_data_role = TYPEC_HOST;
-				manager_set_tablet_source(true);
 				typec_set_pwr_role(usbpd_data->port, usbpd_data->typec_power_role);
 				typec_set_data_role(usbpd_data->port, usbpd_data->typec_data_role);
 				usbpd_data->partner = typec_register_partner(usbpd_data->port, &desc);
@@ -139,7 +137,6 @@ void max77705_ccic_event_work(void *data, int dest, int id, int attach, int even
 				typec_set_data_role(usbpd_data->port, usbpd_data->typec_data_role);
 			} else if (event == USB_STATUS_NOTIFY_ATTACH_DFP) {
 				usbpd_data->typec_data_role = TYPEC_HOST;
-				manager_set_tablet_source(true);
 				typec_set_data_role(usbpd_data->port, usbpd_data->typec_data_role);
 			} else
 				msg_maxim("detach case");
@@ -245,6 +242,7 @@ void max77705_notify_dr_status(struct max77705_usbc_platform_data *usbpd_data, u
 						PDIC_NOTIFY_DEV_USB, PDIC_NOTIFY_ID_USB,
 						0/*attach*/, USB_STATUS_NOTIFY_DETACH/*drp*/, 0);
 				usbpd_data->is_host = HOST_OFF;
+				usbpd_data->send_enter_mode_req = 0;
 			}
 			if (usbpd_data->is_client == CLIENT_OFF) {
 				usbpd_data->is_client = CLIENT_ON;
@@ -629,8 +627,6 @@ static void max77705_ccstat_irq_handler(void *data, int irq)
 			usbc_data->pd_data->current_dr = 0xFF;
 			usbc_data->cc_data->current_vcon = 0xFF;
 			usbc_data->detach_done_wait = 1;
-			manager_set_tablet_source(false);
-			manager_set_entermode(false);
 #if IS_ENABLED(CONFIG_USB_NOTIFY_LAYER)
 			send_otg_notify(o_notify, NOTIFY_EVENT_PD_CONTRACT, 0);
 #endif

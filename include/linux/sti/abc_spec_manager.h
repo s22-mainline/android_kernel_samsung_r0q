@@ -29,16 +29,15 @@ extern int abc_enable_mode;
 extern int abc_init;
 
 int abc_parse_dt(struct device *dev);
-bool sec_abc_is_enabled_error(struct abc_key_data *key_data);
 void sec_abc_dequeue_event_data(struct abc_key_data *key_data);
 void sec_abc_reset_event_buffer(struct abc_key_data *key_data);
 void sec_abc_make_key_data(struct abc_key_data *key_data, char *str);
 bool sec_abc_reached_spec(struct abc_key_data *key_data, unsigned int cur_time);
 void sec_abc_enqueue_event_data(struct abc_key_data *key_data, unsigned int cur_time);
-void sec_abc_send_uevent(struct abc_key_data *key_data, unsigned int cur_time, char *event_type);
 struct abc_common_spec_data *sec_abc_get_matched_common_spec(struct abc_key_data *key_data);
-bool sec_abc_reached_spec_pre(struct abc_key_data *key_data, struct abc_pre_event *pre_event);
 int sec_abc_get_buffer_size_from_th_cnt(int th_max);
+bool sec_abc_is_valid_sysfs_spec_input(char *str, int *mode);
+void sec_abc_apply_changed_spec(char *str, int mode);
 /* spec_type1 */
 int abc_parse_dt_type1(struct device *dev,
 			  struct device_node *np, int idx,
@@ -53,5 +52,4 @@ void sec_abc_enqueue_type1(struct abc_event_buffer *buffer, struct abc_fault_inf
 bool sec_abc_reached_spec_type1(struct abc_common_spec_data *common_spec, unsigned int cur_time);
 struct abc_common_spec_data *sec_abc_get_matched_common_spec_type1(struct abc_key_data *key_data);
 void sec_abc_enqueue_event_data_type1(struct abc_common_spec_data *common_spec, unsigned int cur_time);
-bool sec_abc_reached_spec_type1_pre(struct abc_common_spec_data *common_spec, struct abc_pre_event *pre_event);
 #endif

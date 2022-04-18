@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2017-2020 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2017-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #define pr_fmt(fmt)     KBUILD_MODNAME ":%s() " fmt, __func__
@@ -72,7 +72,7 @@ static int __debug_parse_dt_panic_notifier_priority(struct builder *bd,
 	return 0;
 }
 
-static struct dt_builder __debug_dt_builder[] = {
+static const struct dt_builder __debug_dt_builder[] = {
 	DT_BUILDER(__debug_parse_dt_panic_notifier_priority),
 };
 
@@ -146,7 +146,7 @@ static int __debug_remove(struct platform_device *pdev,
 	return 0;
 }
 
-static struct dev_builder __debug_dev_builder[] = {
+static const struct dev_builder __debug_dev_builder[] = {
 	DEVICE_BUILDER(__debug_parse_dt, NULL),
 	DEVICE_BUILDER(sec_user_fault_init, sec_user_fault_exit),
 	DEVICE_BUILDER(sec_ap_serial_sysfs_init, sec_ap_serial_sysfs_exit),

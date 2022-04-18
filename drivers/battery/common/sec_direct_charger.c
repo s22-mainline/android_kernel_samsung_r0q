@@ -33,6 +33,7 @@ char *sec_direct_charger_mode_str[] = {
 	"UNO-On",
 	"UNO-Off",
 	"UNO-Only",
+	"Not-Set",
 	"Max",
 };
 

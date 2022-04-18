@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2020 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2020-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #include <kunit/test.h>
@@ -38,7 +38,7 @@ static int __test_bdp_parse_dt_always_fail(struct builder *bd,
 	return -ENODEV;
 }
 
-static struct dt_builder __test_bdp_dt_builder_case_0[] = {
+static const struct dt_builder __test_bdp_dt_builder_case_0[] = {
 	DT_BUILDER(__test_bdp_parse_dt_bit_0),
 	DT_BUILDER(__test_bdp_parse_dt_bit_1),
 	DT_BUILDER(__test_bdp_parse_dt_bit_2),
@@ -63,7 +63,7 @@ static void test_case_0_sec_director_parse_dt(struct kunit *test)
 	kunit_kfree(test, drvdata);
 }
 
-static struct dt_builder __test_bdp_dt_builder_case_1[] = {
+static const struct dt_builder __test_bdp_dt_builder_case_1[] = {
 	DT_BUILDER(__test_bdp_parse_dt_bit_0),
 	DT_BUILDER(__test_bdp_parse_dt_bit_1),
 	DT_BUILDER(__test_bdp_parse_dt_always_fail),
@@ -120,7 +120,7 @@ DEFINE_TEST_DESTRUCT_DEV(1);
 DEFINE_TEST_DESTRUCT_DEV(3);
 DEFINE_TEST_DESTRUCT_DEV(4);
 
-static struct dev_builder __test_bdp_dev_builder_test_case_0[] = {
+static const struct dev_builder __test_bdp_dev_builder_test_case_0[] = {
 	DEVICE_BUILDER(__test_bdp_construct_dev_bit_0, NULL),
 	DEVICE_BUILDER(__test_bdp_construct_dev_bit_1,
 		       __test_bdp_destruct_dev_bit_1),
@@ -172,7 +172,7 @@ static int __test_bdp_construct_dev_always_fail(struct builder *bd)
 	return -EBUSY;
 }
 
-static struct dev_builder __test_bdp_dev_builder_test_case_1[] = {
+static const struct dev_builder __test_bdp_dev_builder_test_case_1[] = {
 	DEVICE_BUILDER(__test_bdp_construct_dev_bit_0, NULL),
 	DEVICE_BUILDER(__test_bdp_construct_dev_bit_1, NULL),
 	DEVICE_BUILDER(__test_bdp_construct_dev_bit_2, NULL),

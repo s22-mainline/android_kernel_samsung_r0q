@@ -77,7 +77,8 @@ static void max77705_process_pd(struct max77705_usbc_platform_data *usbc_data)
 	max77705_ccic_event_work(usbc_data, PDIC_NOTIFY_DEV_BATT,
 		PDIC_NOTIFY_ID_POWER_STATUS, 1/*attach*/, 0, 0);
 }
-
+static void max77705_send_new_src_cap(struct max77705_usbc_platform_data *pusbpd,
+	int auth, int d2d_type);
 void max77705_vbus_turn_on_ctrl(struct max77705_usbc_platform_data *usbc_data, bool enable, bool swaped);
 void max77705_response_req_pdo(struct max77705_usbc_platform_data *usbc_data,
 	unsigned char *data)
@@ -552,7 +553,7 @@ err_free_snkcap_data:
 	kfree(snkcap_data);
 }
 
-bool max77704_check_boost_enable(int auth_t, int req_pdo, int d2d_t)
+bool max77705_check_boost_enable(int auth_t, int req_pdo, int d2d_t)
 {
 	if ((auth_t == AUTH_NONE) || (d2d_t != D2D_SRCSNK))
 		return false;
@@ -563,7 +564,7 @@ bool max77704_check_boost_enable(int auth_t, int req_pdo, int d2d_t)
 	return false;
 }
 
-bool max77704_check_boost_off(int auth_t, int req_pdo, int d2d_t)
+bool max77705_check_boost_off(int auth_t, int req_pdo, int d2d_t)
 {
 	if ((auth_t == AUTH_NONE) || (d2d_t != D2D_SRCSNK))
 		return false;
@@ -574,7 +575,7 @@ bool max77704_check_boost_off(int auth_t, int req_pdo, int d2d_t)
 	return false;
 }
 
-bool max77704_check_src_otg_type(bool enable, int auth_t, int req_pdo, int d2d_t)
+bool max77705_check_src_otg_type(bool enable, int auth_t, int req_pdo, int d2d_t)
 {
 	if ((auth_t == AUTH_NONE) || (d2d_t != D2D_SRCSNK))
 		return enable;
@@ -668,14 +669,14 @@ void max77705_vbus_turn_on_ctrl(struct max77705_usbc_platform_data *usbc_data, b
 	while (count) {
 		psy_otg = power_supply_get_by_name("otg");
 		if (psy_otg) {
-			if (max77704_check_boost_off(auth_type, req_pdo_type, d2d_type)) {
+			if (max77705_check_boost_off(auth_type, req_pdo_type, d2d_type)) {
 				val.intval = 0;
 				 /* disable dc reverse boost before otg on */
 				psy_do_property("battery", set,
 					POWER_SUPPLY_EXT_PROP_CHARGE_OTG_CONTROL, val);
 			}
 
-			val.intval = max77704_check_src_otg_type(enable, auth_type, req_pdo_type, d2d_type);
+			val.intval = max77705_check_src_otg_type(enable, auth_type, req_pdo_type, d2d_type);
 #if defined(CONFIG_USE_SECOND_MUIC)
 			muic_hv_charger_disable(enable);
 #endif
@@ -689,7 +690,7 @@ void max77705_vbus_turn_on_ctrl(struct max77705_usbc_platform_data *usbc_data, b
 				} else {
 					pr_info("otg accessory power = %d\n", on);
 				}
-				if (max77704_check_boost_enable(auth_type, req_pdo_type, d2d_type)) {
+				if (max77705_check_boost_enable(auth_type, req_pdo_type, d2d_type)) {
 					val.intval = enable; /* set dc reverse boost after otg off */
 					psy_do_property("battery", set,
 						POWER_SUPPLY_EXT_PROP_CHARGE_OTG_CONTROL, val);
@@ -1212,6 +1213,9 @@ static void max77705_pd_check_pdmsg(struct max77705_usbc_platform_data *usbc_dat
 		}
 		break;
 	case PRSWAP_SWAPTOSRC:
+		if (usbc_data->pd_data->d2d_type == D2D_SRCSNK)
+			max77705_send_new_src_cap(g_usbc_data,
+				usbc_data->pd_data->auth_type, usbc_data->pd_data->d2d_type);
 		max77705_vbus_turn_on_ctrl(usbc_data, ON, false);
 		msg_maxim("PRSWAP_SNKTOSRC : [%x]", pd_msg);
 		break;
@@ -1684,22 +1688,30 @@ void max77705_vpdo_auth(int auth, int d2d_type)
 {
 	struct max77705_pd_data *pd_data = g_usbc_data->pd_data;
 
+	if (d2d_type == D2D_NONE)
+		return;
+
 	if (pd_data->cc_status == CC_SRC) {
-		if (d2d_type != D2D_NONE) {
-			if (((pd_data->auth_type == AUTH_HIGH_PWR) && (auth == AUTH_LOW_PWR)) ||
-					((pd_data->auth_type == AUTH_LOW_PWR) && (auth == AUTH_HIGH_PWR))) {
-				max77705_send_new_src_cap(g_usbc_data, auth, d2d_type);
-				pd_data->src_cap_done = CC_SRC;
-				pr_info("%s: change src %s -> %s\n", __func__,
-					(auth == AUTH_LOW_PWR) ? "HIGH PWR" : "LOW PWR",
-					(auth == AUTH_LOW_PWR) ? "LOW PWR" : "HIGH PWR");
-			}
+		if (((pd_data->auth_type == AUTH_HIGH_PWR) && (auth == AUTH_LOW_PWR)) ||
+				((pd_data->auth_type == AUTH_LOW_PWR) && (auth == AUTH_HIGH_PWR))) {
+			max77705_send_new_src_cap(g_usbc_data, auth, d2d_type);
+			pd_data->src_cap_done = CC_SRC;
+			pr_info("%s: change src %s -> %s\n", __func__,
+				(auth == AUTH_LOW_PWR) ? "HIGH PWR" : "LOW PWR",
+				(auth == AUTH_LOW_PWR) ? "LOW PWR" : "HIGH PWR");
 		}
 	} else if ((pd_data->cc_status == CC_SNK) &&
 		(auth == AUTH_HIGH_PWR)) {
 		pr_info("%s: preset vpdo auth for prswap snk to src\n", __func__);
 	}
 
+	/* set default src cap for detach or hard reset case */
+	if (pd_data->cc_status != CC_SNK) {
+		if ((pd_data->auth_type == AUTH_HIGH_PWR) && (auth == AUTH_NONE)) {
+			max77705_send_new_src_cap(g_usbc_data, auth, d2d_type);
+			pr_info("%s: set to default src cap\n", __func__);
+		}
+	}
 
 	pr_info("%s: vpdo auth set (%d, %d)\n", __func__, auth, d2d_type);
 	pd_data->auth_type = auth;

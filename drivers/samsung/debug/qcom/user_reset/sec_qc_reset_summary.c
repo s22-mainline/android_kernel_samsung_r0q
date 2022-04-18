@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2006-2021 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2016-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #define pr_fmt(fmt)     KBUILD_MODNAME ":%s() " fmt, __func__
@@ -11,7 +11,6 @@
 #include <linux/proc_fs.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-#include <linux/vmalloc.h>
 
 #include <linux/samsung/debug/qcom/sec_qc_dbg_partition.h>
 
@@ -63,7 +62,7 @@ static int __reset_summary_prepare_buf(
 		goto err_get_size;
 	}
 
-	buf = vmalloc(size);
+	buf = kvmalloc(size, GFP_KERNEL);
 	if (!buf) {
 		ret = -ENOMEM;
 		goto err_nomem;
@@ -79,7 +78,7 @@ static int __reset_summary_prepare_buf(
 	return 0;
 
 failed_to_read:
-	vfree(buf);
+	kvfree(buf);
 err_nomem:
 err_get_size:
 	return ret;
@@ -88,7 +87,7 @@ err_get_size:
 static void __reset_summary_release_buf(
 		struct qc_user_reset_proc *reset_summary)
 {
-	vfree(reset_summary->buf);
+	kvfree(reset_summary->buf);
 	reset_summary->buf = NULL;
 }
 

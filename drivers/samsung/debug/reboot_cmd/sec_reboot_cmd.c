@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2020 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2020-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #define pr_fmt(fmt)     KBUILD_MODNAME ":%s() " fmt, __func__
@@ -451,7 +451,7 @@ static int __rbcmd_parse_dt_restart_handler_priority(struct builder *bd,
 	return 0;
 }
 
-static struct dt_builder __rbcmd_dt_builder[] = {
+static const struct dt_builder __rbcmd_dt_builder[] = {
 	DT_BUILDER(__rbcmd_parse_dt_reboot_notifier_priority),
 	DT_BUILDER(__rbcmd_parse_dt_restart_handler_priority),
 };
@@ -619,7 +619,7 @@ static int __rbcmd_remove(struct platform_device *pdev,
 }
 
 #if IS_ENABLED(CONFIG_KUNIT) && IS_ENABLED(CONFIG_UML)
-static struct dev_builder __rbcmd_mock_dev_builder[] = {
+static const struct dev_builder __rbcmd_mock_dev_builder[] = {
 	DEVICE_BUILDER(__rbcmd_probe_prolog, NULL),
 	DEVICE_BUILDER(__rbcmd_probe_epilog, __rbcmd_remove_prolog),
 };
@@ -637,7 +637,7 @@ int kunit_rbcmd_mock_remove(struct platform_device *pdev)
 }
 #endif
 
-static struct dev_builder __rbcmd_dev_builder[] = {
+static const struct dev_builder __rbcmd_dev_builder[] = {
 	DEVICE_BUILDER(__rbcmd_parse_dt, NULL),
 	DEVICE_BUILDER(__rbcmd_probe_prolog, __rbcmd_remove_epilog),
 	DEVICE_BUILDER(__rbcmd_register_reboot_notifier,

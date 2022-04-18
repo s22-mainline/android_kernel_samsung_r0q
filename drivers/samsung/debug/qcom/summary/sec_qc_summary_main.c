@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2016-2020 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2016-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #include <linux/io.h>
@@ -85,6 +85,9 @@ static int __summary_parse_dt_memory_region_google_debug_kinfo(
 	struct device_node *mem_np;
 	struct reserved_mem *rmem;
 
+	if (!IS_ENABLED(CONFIG_DEBUG_KINFO) || IS_BUILTIN(CONFIG_SEC_QC_SUMMARY))
+		return 0;
+
 	idx = of_property_match_string(np, "memory-region-names",
 			"google,debug_kinfo");
 	mem_np = of_parse_phandle(np, "memory-region", idx);
@@ -115,7 +118,7 @@ static int __summary_parse_dt_memory_region_google_debug_kinfo(
 	return 0;
 }
 
-static struct dt_builder __summary_dt_builder[] = {
+static const struct dt_builder __summary_dt_builder[] = {
 	DT_BUILDER(__summary_parse_dt_memory_region_google_debug_kinfo),
 	/* concrete builders which can return -EPROBE_DEFER should be
 	 * placed before here.
@@ -293,7 +296,7 @@ static int __summary_probe_epilog(struct builder *bd)
 	return 0;
 }
 
-static struct dev_builder __summary_dev_builder[] = {
+static const struct dev_builder __summary_dev_builder[] = {
 	DEVICE_BUILDER(__summary_parse_dt, NULL),
 	DEVICE_BUILDER(__summary_alloc_summary_from_smem, NULL),
 	DEVICE_BUILDER(__qc_summary_debug_kinfo_init, NULL),
@@ -324,7 +327,7 @@ static struct dev_builder __summary_dev_builder[] = {
 };
 
 static int __summary_probe(struct platform_device *pdev,
-		struct dev_builder *builder, ssize_t n)
+		const struct dev_builder *builder, ssize_t n)
 {
 	struct device *dev = &pdev->dev;
 	struct qc_summary_drvdata *drvdata;
@@ -339,7 +342,7 @@ static int __summary_probe(struct platform_device *pdev,
 }
 
 static int __summary_remove(struct platform_device *pdev,
-		struct dev_builder *builder, ssize_t n)
+		const struct dev_builder *builder, ssize_t n)
 {
 	struct qc_summary_drvdata *drvdata = platform_get_drvdata(pdev);
 

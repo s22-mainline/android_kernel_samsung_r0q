@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2020 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #define pr_fmt(fmt)     KBUILD_MODNAME ":%s() " fmt, __func__
@@ -15,6 +15,7 @@
 #include <linux/platform_device.h>
 
 #include <linux/samsung/builder_pattern.h>
+#include <linux/samsung/of_early_populate.h>
 #include <linux/samsung/debug/sec_crashkey_long.h>
 #include <linux/samsung/debug/sec_upload_cause.h>
 #include <linux/samsung/debug/qcom/sec_qc_upload_cause.h>
@@ -447,7 +448,7 @@ static void __qc_upldc_iounmap_mock_qcom_upload_cause(struct builder *bd)
 	qcom_upload_cause = NULL;
 }
 
-static struct dev_builder __qc_upldc_mock_dev_builder[] = {
+static const struct dev_builder __qc_upldc_mock_dev_builder[] = {
 	DEVICE_BUILDER(__qc_upldc_ioremap_mock_qcom_upload_cause,
 		       __qc_upldc_iounmap_mock_qcom_upload_cause),
 	DEVICE_BUILDER(__qc_upldc_add_upload_cause_suite,
@@ -467,7 +468,7 @@ int kunit_qc_upldc_mock_remove(struct platform_device *pdev)
 }
 #endif
 
-static struct dev_builder __qc_upldc_dev_builder[] = {
+static const struct dev_builder __qc_upldc_dev_builder[] = {
 	DEVICE_BUILDER(__qc_upldc_ioremap_qcom_upload_cause,
 		       __qc_upldc_iounmap_qcom_upload_cause),
 	DEVICE_BUILDER(__qc_upldc_add_upload_cause_suite,
@@ -507,9 +508,23 @@ static struct platform_driver sec_qc_upldc_driver = {
 
 static int __init sec_qc_upldc_init(void)
 {
-	return platform_driver_register(&sec_qc_upldc_driver);
+	int err;
+
+	err = platform_driver_register(&sec_qc_upldc_driver);
+	if (err)
+		return err;
+
+	err = __of_platform_early_populate_init(sec_qc_upldc_match_table);
+	if (err)
+		return err;
+
+	return 0;
 }
-subsys_initcall_sync(sec_qc_upldc_init);
+#if IS_BUILTIN(CONFIG_SEC_QC_UPLOAD_CAUSE)
+arch_initcall_sync(sec_qc_upldc_init);
+#else
+module_init(sec_qc_upldc_init);
+#endif
 
 static void __exit sec_qc_upldc_exit(void)
 {

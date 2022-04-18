@@ -44,7 +44,6 @@
 #endif
 #endif
 #include <linux/version.h>
-#include <linux/usb/typec/manager/usb_typec_manager_notifier.h>
 
 static enum pdic_sysfs_property max77705_sysfs_properties[] = {
 	PDIC_SYSFS_PROP_CHIP_NAME,
@@ -2127,7 +2126,6 @@ static void max77705_irq_execute(struct max77705_usbc_platform_data *usbc_data,
 			 * 0x5D of data[0] means OPCODE_SAMSUNG_READ_MESSAGE.
 			 * When data[0] is 0x5D, 0x03 of data[1] means SVID of enter mode.
 			 */
-			manager_set_entermode(true);
 			max77705_ccic_event_work(usbc_data,
 					PDIC_NOTIFY_DEV_ALL, PDIC_NOTIFY_ID_SVID_INFO,
 					SAMSUNG_VENDOR_ID, 0, 0);
@@ -3834,8 +3832,6 @@ static int max77705_usbc_probe(struct platform_device *pdev)
 
 	usbc_data->cc_open_req = 1;
 	pdic_manual_ccopen_request(0);
-	manager_set_tablet_source(false);
-	manager_set_entermode(false);	
 
 	msg_maxim("probing Complete..");
 	return 0;

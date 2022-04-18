@@ -478,8 +478,11 @@ int light_panel_data_notify(struct notifier_block *nb,
 			(data->pre_panel_idx == evdata->display_idx)))
 			return 0;
 
-		data->brightness_info[5] = data->pre_panel_state = panel_state;
+		data->pre_panel_state = panel_state;
 		data->pre_panel_idx = evdata->display_idx;
+		if (evdata->display_idx == 0)
+			data->brightness_info[5] = panel_state;
+
 		msg_buf[0] = OPTION_TYPE_SET_PANEL_STATE;
 		msg_buf[1] = panel_state;
 		msg_buf[2] = evdata->display_idx;
@@ -496,21 +499,22 @@ int light_panel_data_notify(struct notifier_block *nb,
 		mutex_unlock(&data->light_factory_mutex);
 	} else if (val == PANEL_EVENT_TEST_MODE_CHANGED) {
 		struct panel_test_mode_data *test_data = v;
-		int32_t msg_buf[2];
+		int32_t msg_buf[3];
 
-		if ((test_data->display_idx > 1) ||
-			(pre_test_state == (int32_t)test_data->state))
+		if (test_data->display_idx > 1)
 			return 0;
 
 		pre_test_state = (int32_t)test_data->state;
 		msg_buf[0] = OPTION_TYPE_SET_PANEL_TEST_STATE;
 		msg_buf[1] = (int32_t)test_data->state;
+		msg_buf[2] = test_data->display_idx;
 
 		light_idx = get_light_display_sidx(test_data->display_idx);
 
 		mutex_lock(&data->light_factory_mutex);
-		pr_info("[SSC_FAC] %s: panel test state %d\n",
-			__func__, (int)test_data->state);
+		pr_info("[SSC_FAC] %s: panel test state %d (%d)\n",
+			__func__, (int)test_data->state,
+			test_data->display_idx);
 
 		adsp_unicast(msg_buf, sizeof(msg_buf),
 			light_idx, 0, MSG_TYPE_OPTION_DEFINE);
@@ -530,7 +534,7 @@ int light_panel_data_notify(struct notifier_block *nb,
 		light_idx = get_light_display_sidx(screen_data->display_idx);
 
 		mutex_lock(&data->light_factory_mutex);
-		pr_info("[SSC_FAC] %s: panel screen mode %d %d\n",
+		pr_info("[SSC_FAC] %s: panel screen mode %d (%d)\n",
 			__func__, screen_data->mode, screen_data->display_idx);
 
 		adsp_unicast(msg_buf, sizeof(msg_buf),
@@ -1040,47 +1044,83 @@ void light_cal_read_work_func(struct work_struct *work)
 	struct adsp_data *data = container_of((struct delayed_work *)work,
 		struct adsp_data, light_cal_work);
 	uint16_t light_idx = get_light_sidx(data);
-	int32_t msg_buf[5] = {0, }, cmd, cnt = 0;
+	int32_t msg_buf[5] = {0, }, cmd, cnt = 0, i = 1;
 
-	mutex_lock(&data->light_factory_mutex);
-	cmd = OPTION_TYPE_LOAD_LIGHT_CAL;
-	adsp_unicast(&cmd, sizeof(int32_t),
-		light_idx, 0, MSG_TYPE_SET_TEMPORARY_MSG);
-
-	while (!(data->ready_flag[MSG_TYPE_SET_TEMPORARY_MSG]
-		& 1 << light_idx) && cnt++ < TIMEOUT_CNT)
-		usleep_range(1000, 1100);
-
-	data->ready_flag[MSG_TYPE_SET_TEMPORARY_MSG] &= ~(1 << light_idx);
-	mutex_unlock(&data->light_factory_mutex);
-	if (cnt >= TIMEOUT_CNT) {
-		pr_err("[SSC_FAC] %s: Timeout!!!\n", __func__);
-		return;
-	} else if (data->msg_buf[light_idx][0] < 0) {
-		pr_err("[SSC_FAC] %s: UB is not matched!!!(%d)\n", __func__,
-			data->msg_buf[light_idx][0]);
-#if IS_ENABLED(CONFIG_SUPPORT_PROX_CALIBRATION)
-		prox_send_cal_data(data, false);
-#endif
-		return;
-	}
-
-	msg_buf[0] = OPTION_TYPE_SET_LIGHT_CAL;
-	msg_buf[1] = data->light_cal_result = data->msg_buf[light_idx][0];
-	msg_buf[2] = data->light_cal1 = data->msg_buf[light_idx][1];
-	msg_buf[3] = data->light_cal2 = data->msg_buf[light_idx][2];
-	msg_buf[4] = data->copr_w = data->msg_buf[light_idx][3];
-
-#if IS_ENABLED(CONFIG_SUPPORT_PROX_CALIBRATION)
-	data->prox_cal = data->msg_buf[light_idx][4];
-	prox_send_cal_data(data, true);
+#if IS_ENABLED(CONFIG_SUPPORT_DUAL_OPTIC)
+	light_idx = MSG_LIGHT;
+	i = 2;
 #endif
 
-	if (data->light_cal_result == LIGHT_CAL_PASS) {
+	while (i--) {
 		mutex_lock(&data->light_factory_mutex);
-		adsp_unicast(msg_buf, sizeof(msg_buf),
-			light_idx, 0, MSG_TYPE_OPTION_DEFINE);
+		cmd = OPTION_TYPE_LOAD_LIGHT_CAL;
+		adsp_unicast(&cmd, sizeof(int32_t),
+			light_idx, 0, MSG_TYPE_SET_TEMPORARY_MSG);
+
+		while (!(data->ready_flag[MSG_TYPE_SET_TEMPORARY_MSG]
+			& 1 << light_idx) && cnt++ < TIMEOUT_CNT)
+			usleep_range(1000, 1100);
+
+		data->ready_flag[MSG_TYPE_SET_TEMPORARY_MSG] &= ~(1 << light_idx);
 		mutex_unlock(&data->light_factory_mutex);
+		if (cnt >= TIMEOUT_CNT) {
+			pr_err("[SSC_FAC] %s: Timeout!!!\n", __func__);
+			return;
+		} else if (data->msg_buf[light_idx][0] < 0) {
+			pr_err("[SSC_FAC] %s: UB is not matched!!!(%d %d)\n", __func__,
+				light_idx, data->msg_buf[light_idx][0]);
+#if IS_ENABLED(CONFIG_SUPPORT_PROX_CALIBRATION)
+#if IS_ENABLED(CONFIG_SUPPORT_DUAL_OPTIC)
+			if (light_idx == MSG_LIGHT_SUB)
+#endif
+				prox_send_cal_data(data, false);
+#endif
+#if IS_ENABLED(CONFIG_SUPPORT_DUAL_OPTIC)
+			light_idx = MSG_LIGHT_SUB;
+			msg_buf[0] = msg_buf[1] = msg_buf[2] = msg_buf[3] = msg_buf[4] = 0;
+			cnt = 0;
+			continue;
+#else
+			return;
+#endif
+		}
+
+		msg_buf[0] = OPTION_TYPE_SET_LIGHT_CAL;
+		if (light_idx == MSG_LIGHT) {
+			msg_buf[1] = data->light_cal_result = data->msg_buf[light_idx][0];
+			msg_buf[2] = data->light_cal1 = data->msg_buf[light_idx][1];
+			msg_buf[3] = data->light_cal2 = data->msg_buf[light_idx][2];
+			msg_buf[4] = data->copr_w = data->msg_buf[light_idx][3];
+		} else {
+			msg_buf[1] = data->sub_light_cal_result = data->msg_buf[light_idx][0];
+			msg_buf[2] = data->sub_light_cal1 = data->msg_buf[light_idx][1];
+			msg_buf[3] = data->sub_light_cal2 = data->msg_buf[light_idx][2];
+			msg_buf[4] = data->sub_copr_w = data->msg_buf[light_idx][3];
+		}
+
+#if IS_ENABLED(CONFIG_SUPPORT_PROX_CALIBRATION)
+#if IS_ENABLED(CONFIG_SUPPORT_DUAL_OPTIC)
+		if (light_idx == MSG_LIGHT_SUB) {
+#endif
+			data->prox_cal = data->msg_buf[light_idx][4];
+			prox_send_cal_data(data, true);
+#if IS_ENABLED(CONFIG_SUPPORT_DUAL_OPTIC)
+		}
+#endif
+#endif
+
+		if (msg_buf[1] == LIGHT_CAL_PASS) {
+			mutex_lock(&data->light_factory_mutex);
+			adsp_unicast(msg_buf, sizeof(msg_buf),
+				light_idx, 0, MSG_TYPE_OPTION_DEFINE);
+			mutex_unlock(&data->light_factory_mutex);
+		}
+
+#if IS_ENABLED(CONFIG_SUPPORT_DUAL_OPTIC)
+		light_idx = MSG_LIGHT_SUB;
+		msg_buf[0] = msg_buf[1] = msg_buf[2] = msg_buf[3] = msg_buf[4] = 0;
+		cnt = 0;
+#endif
 	}
 }
 
@@ -1090,6 +1130,11 @@ void light_cal_init_work(struct adsp_data *data)
 	data->light_cal1 = -1;
 	data->light_cal2 = -1;
 	data->copr_w = -1;
+
+	data->sub_light_cal_result = LIGHT_CAL_FAIL;
+	data->sub_light_cal1 = -1;
+	data->sub_light_cal2 = -1;
+	data->sub_copr_w = -1;
 
 	schedule_delayed_work(&data->light_cal_work, msecs_to_jiffies(8000));
 }
@@ -1119,12 +1164,21 @@ static ssize_t light_cal_show(struct device *dev,
 		cur_lux = data->msg_buf[light_idx][4];
 	}
 
-	pr_info("[SSC_FAC] %s: cal_data (P/F: %d, Cal1: %d, Cal2: %d, COPR_W: %d, cur lux: %d)\n",
-		__func__, data->light_cal_result, data->light_cal1,
-		data->light_cal2, data->copr_w, cur_lux);
+	if (light_idx == MSG_LIGHT) {
+		pr_info("[SSC_FAC] %s: cal_data (P/F: %d, Cal1: %d, Cal2: %d, COPR_W: %d, cur lux: %d)\n",
+			__func__, data->light_cal_result, data->light_cal1,
+			data->light_cal2, data->copr_w, cur_lux);
 
-	return snprintf(buf, PAGE_SIZE, "%d,%d,%d\n",
-		data->light_cal_result, data->light_cal2, cur_lux);
+		return snprintf(buf, PAGE_SIZE, "%d,%d,%d\n",
+			data->light_cal_result, data->light_cal2, cur_lux);
+	} else {
+		pr_info("[SSC_FAC] %s: cal_data (P/F: %d, Cal1: %d, Cal2: %d, COPR_W: %d, cur lux: %d)\n",
+			__func__, data->sub_light_cal_result, data->sub_light_cal1,
+			data->sub_light_cal2, data->sub_copr_w, cur_lux);
+
+		return snprintf(buf, PAGE_SIZE, "%d,%d,%d\n",
+			data->sub_light_cal_result, data->sub_light_cal2, cur_lux);
+	}
 }
 
 static ssize_t light_cal_store(struct device *dev,

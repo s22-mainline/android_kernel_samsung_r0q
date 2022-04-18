@@ -45,7 +45,7 @@ static int __modem_reset_data_restore(struct qc_user_reset_drvdata *drvdata)
 	struct device *dev = drvdata->bd.dev;
 	struct sec_qc_summary_data_modem *modem;
 	bool result;
-	
+
 	modem = sec_qc_summary_get_modem();
 	if (PTR_ERR(modem) == -ENODEV)
 		/* NOTE: never rechable code because, sec_qc_summary.ko is load

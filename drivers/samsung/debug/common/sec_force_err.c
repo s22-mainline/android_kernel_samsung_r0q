@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2017-2020 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2017-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #define pr_fmt(fmt)     KBUILD_MODNAME ":%s() " fmt, __func__
@@ -398,7 +398,7 @@ static int __force_err_debugfs_create(struct builder *bd) { return 0; }
 static void __force_err_debugfs_remove(struct builder *bd) {}
 #endif /* IS_ENABLED(CONFIG_DEBUG_FS) */
 
-static struct dev_builder __force_err_dev_builder[] = {
+static const struct dev_builder __force_err_dev_builder[] = {
 	DEVICE_BUILDER(__force_err_probe_prolog, __force_err_remove_epilog),
 	DEVICE_BUILDER(__force_err_build_htbl, NULL),
 	DEVICE_BUILDER(__force_err_debugfs_create, __force_err_debugfs_remove),

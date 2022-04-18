@@ -291,6 +291,9 @@ static struct sec_cmd tsp_commands[] = {
 static ssize_t sec_virtual_tsp_support_feature_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(5, 10, 0))
+	return snprintf(buf, SEC_CMD_BUF_SIZE, "1");
+#else
 	char buffer[10];
 	int ret;
 
@@ -301,6 +304,7 @@ static ssize_t sec_virtual_tsp_support_feature_show(struct device *dev,
 		return snprintf(buf, SEC_CMD_BUF_SIZE, "NG\n");
 
 	return snprintf(buf, SEC_CMD_BUF_SIZE, "%s", buffer);
+#endif
 }
 
 static ssize_t sec_virtual_tsp_prox_power_off_show(struct device *dev,

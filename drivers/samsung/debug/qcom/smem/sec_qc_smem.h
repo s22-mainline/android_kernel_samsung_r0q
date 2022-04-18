@@ -37,7 +37,17 @@ struct qc_smem_drvdata {
 	struct builder bd;
 	sec_smem_id_vendor0_v2_t *vendor0;
 	unsigned int vendor0_ver;
-	void *vendor1;
+	union {
+		void *vendor1;
+		/* TODO: debugging purpose only.
+		 * Do NOT access below variables in the driver code.
+		 * 'vendor1' can only be accessed by 'vendor1_ops' to prevent
+		 * code smells like 'Change preventers'.
+		 */
+		const sec_smem_id_vendor1_v5_t * const __vendor1_v5;
+		const sec_smem_id_vendor1_v6_t * const __vendor1_v6;
+		const sec_smem_id_vendor1_v7_t * const __vendor1_v7;
+	};
 	unsigned int vendor1_ver;
 	const struct vendor1_operations *vendor1_ops;
 	ap_health_t *ap_health;

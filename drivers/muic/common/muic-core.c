@@ -465,6 +465,31 @@ int muic_afc_get_voltage(void)
 EXPORT_SYMBOL(muic_afc_get_voltage);
 
 #if !defined(CONFIG_DISCRETE_CHARGER)
+/* need to be implemented
+static int muic_afc_request_voltage_check(int cause)
+{
+	return !cause;
+}
+*/
+
+int muic_afc_request_cause_clear(void)
+{
+	struct muic_platform_data *pdata = &muic_pdata;
+
+	if (pdata == NULL)
+		return -1;
+	pdata->afc_request_cause = 0;
+	return 0;
+}
+EXPORT_SYMBOL_GPL(muic_afc_request_cause_clear);
+
+/* need to be implemented */
+int muic_afc_request_voltage(int cause, int voltage)
+{
+	return muic_afc_set_voltage(voltage);
+}
+EXPORT_SYMBOL_GPL(muic_afc_request_voltage);
+
 int muic_afc_set_voltage(int voltage)
 {
 	struct muic_platform_data *pdata = &muic_pdata;

@@ -24,6 +24,11 @@
 #include <linux/mailbox_client.h>
 #include <linux/ipc_logging.h>
 #include <linux/suspend.h>
+#if IS_ENABLED(CONFIG_SSC_WAKEUP_DEBUG)
+#include <linux/time.h>
+#include <linux/ktime.h>
+#include <linux/time64.h>
+#endif
 #include <soc/qcom/subsystem_notif.h>
 
 #include "rpmsg_internal.h"
@@ -1256,6 +1261,11 @@ static int qcom_glink_handle_signals(struct qcom_glink *glink,
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_SSC_WAKEUP_DEBUG)
+#define MAX_TS_ARR_SIZE	3
+struct timespec64 slpi_wakeup_ts[MAX_TS_ARR_SIZE];
+static int slpi_wakeup_ts_idx;
+#endif
 static int qcom_glink_native_rx(struct qcom_glink *glink, int iterations)
 {
 	struct glink_msg msg;
@@ -1283,6 +1293,26 @@ static int qcom_glink_native_rx(struct qcom_glink *glink, int iterations)
 		glink_resume_pkt = true;
 		should_wake = false;
 		pm_system_wakeup();
+#if IS_ENABLED(CONFIG_SSC_WAKEUP_DEBUG)
+		if (!strcmp(glink->irqname, "glink-native-slpi")) {
+			int curr_idx = slpi_wakeup_ts_idx;
+			int prev_idx = (curr_idx >= MAX_TS_ARR_SIZE - 1) ?
+					(0) : (curr_idx + 1);
+			
+			slpi_wakeup_ts[slpi_wakeup_ts_idx++] = 
+				ktime_to_timespec64(ktime_get_boottime());
+
+			if (slpi_wakeup_ts_idx >= MAX_TS_ARR_SIZE)
+				slpi_wakeup_ts_idx = 0;
+			if (slpi_wakeup_ts[curr_idx].tv_sec != 0
+				&& slpi_wakeup_ts[prev_idx].tv_sec != 0 
+				&& (slpi_wakeup_ts[curr_idx].tv_sec == 
+					slpi_wakeup_ts[prev_idx].tv_sec)) {
+				pr_info("frequent AP wakeup due to slpi\n");
+				panic("force crash:frequent AP wakeup due to slpi\n");
+			}
+		}
+#endif
 	}
 	/* To wakeup any blocking writers */
 	wake_up_all(&glink->tx_avail_notify);

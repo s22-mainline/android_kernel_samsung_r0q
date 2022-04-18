@@ -814,6 +814,13 @@ void sec_cmd_exit(struct sec_cmd_data *data, int devt)
 	kfree(data->cmd_result);
 	mutex_destroy(&data->cmd_lock);
 	list_del(&data->cmd_list_head);
+
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
+	if (devt == SEC_CLASS_DEVT_TSP1)
+		main_sec = NULL;
+	if (devt == SEC_CLASS_DEVT_TSP2)
+		sub_sec = NULL;
+#endif
 }
 EXPORT_SYMBOL(sec_cmd_exit);
 
@@ -880,15 +887,47 @@ void sec_cmd_virtual_tsp_register(struct sec_cmd_data *sec)
 	}
 }
 
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(5, 10, 0))
+int sec_cmd_virtual_tsp_read_sysfs(struct sec_cmd_data *sec, const char *path, char *buf, int len)
+{
+	int ret = 0;
+
+	if (main_sec) {
+		if (strcmp(path, PATH_MAIN_SEC_CMD_STATUS) == 0)
+			sec_cmd_show_status(main_sec->fac_dev, NULL, buf);
+		else if (strcmp(path, PATH_MAIN_SEC_CMD_RESULT) == 0)
+			sec_cmd_show_result(main_sec->fac_dev, NULL, buf);
+		else if (strcmp(path, PATH_MAIN_SEC_CMD_STATUS_ALL) == 0)
+			sec_cmd_show_status_all(main_sec->fac_dev, NULL, buf);
+		else if (strcmp(path, PATH_MAIN_SEC_CMD_RESULT_ALL) == 0)
+			sec_cmd_show_result_all(main_sec->fac_dev, NULL, buf);
+	}
+
+	if (sub_sec) {
+		if (strcmp(path, PATH_SUB_SEC_CMD_STATUS) == 0)
+			sec_cmd_show_status(sub_sec->fac_dev, NULL, buf);
+		else if (strcmp(path, PATH_SUB_SEC_CMD_RESULT) == 0)
+			sec_cmd_show_result(sub_sec->fac_dev, NULL, buf);
+		else if (strcmp(path, PATH_SUB_SEC_CMD_STATUS_ALL) == 0)
+			sec_cmd_show_status_all(sub_sec->fac_dev, NULL, buf);
+		else if (strcmp(path, PATH_SUB_SEC_CMD_RESULT_ALL) == 0)
+			sec_cmd_show_result_all(sub_sec->fac_dev, NULL, buf);
+	}
+
+	if (ret < 0) {
+		input_err(true, sec->fac_dev, "%s: failed to read, len:%d, ret:%d\n", __func__, len, ret);
+		ret = -EIO;
+	}
+
+	return ret;
+}
+#else
 int sec_cmd_virtual_tsp_read_sysfs(struct sec_cmd_data *sec, const char *path, char *buf, int len)
 {
 	int ret = 0;
 	mm_segment_t old_fs;
 	struct file *sysfs;
 
-#if (LINUX_VERSION_CODE > KERNEL_VERSION(5, 4, 0))
-	return 0;
-#endif
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
 
@@ -911,8 +950,32 @@ int sec_cmd_virtual_tsp_read_sysfs(struct sec_cmd_data *sec, const char *path, c
 
 	return ret;
 }
+#endif
 EXPORT_SYMBOL(sec_cmd_virtual_tsp_read_sysfs);
 
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(5, 10, 0))
+int sec_cmd_virtual_tsp_write_sysfs(struct sec_cmd_data *sec, const char *path, const char *cmd)
+{
+	int ret = 0;
+	int len;
+
+	len = strlen(cmd);
+	if (strcmp(path, PATH_MAIN_SEC_CMD) == 0) {
+		if (main_sec)
+			ret = sec_cmd_store(main_sec->fac_dev, NULL, cmd, len);
+
+	} else if (strcmp(path, PATH_SUB_SEC_CMD) == 0) {
+		if (sub_sec)
+			ret = sec_cmd_store(sub_sec->fac_dev, NULL, cmd, len);
+	}
+	if (ret != len) {
+		input_err(true, sec->fac_dev, "%s: failed to write, len:%d, ret:%d\n", __func__, len, ret);
+		ret = -EIO;
+	}
+
+	return ret;
+}
+#else
 int sec_cmd_virtual_tsp_write_sysfs(struct sec_cmd_data *sec, const char *path, const char *cmd)
 {
 	int ret = 0;
@@ -920,9 +983,7 @@ int sec_cmd_virtual_tsp_write_sysfs(struct sec_cmd_data *sec, const char *path, 
 	struct file *sysfs;
 	int len;
 
-#if (LINUX_VERSION_CODE > KERNEL_VERSION(5, 4, 0))
-	return 0;
-#endif
+	len = strlen(cmd);
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
 
@@ -934,7 +995,6 @@ int sec_cmd_virtual_tsp_write_sysfs(struct sec_cmd_data *sec, const char *path, 
 		return ret;
 	}
 
-	len = strlen(cmd);
 	ret = sysfs->f_op->write(sysfs, cmd, len, &sysfs->f_pos);
 	if (ret != len) {
 		input_err(true, sec->fac_dev, "%s: failed to write, len:%d, ret:%d\n", __func__, len, ret);
@@ -946,6 +1006,7 @@ int sec_cmd_virtual_tsp_write_sysfs(struct sec_cmd_data *sec, const char *path, 
 
 	return ret;
 }
+#endif
 EXPORT_SYMBOL(sec_cmd_virtual_tsp_write_sysfs);
 
 static int sec_cmd_virtual_tsp_get_cmd_status(struct sec_cmd_data *sec, char *path)

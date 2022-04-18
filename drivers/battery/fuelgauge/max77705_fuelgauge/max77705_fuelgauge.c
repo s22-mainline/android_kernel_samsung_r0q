@@ -1963,7 +1963,9 @@ static int max77705_fg_get_property(struct power_supply *psy,
 		break;
 		/* SOC (%) */
 	case POWER_SUPPLY_PROP_CAPACITY:
-			val->intval = max77705_get_fg_ui_soc(fuelgauge, val);
+		mutex_lock(&fuelgauge->fg_lock);
+		val->intval = max77705_get_fg_ui_soc(fuelgauge, val);
+		mutex_unlock(&fuelgauge->fg_lock);
 		break;
 		/* Battery Temperature */
 	case POWER_SUPPLY_PROP_TEMP:
@@ -2170,11 +2172,13 @@ static int max77705_fg_set_property(struct power_supply *psy,
 		max77705_fg_reset_capacity_by_jig_connection(fuelgauge);
 		break;
 	case POWER_SUPPLY_PROP_ENERGY_FULL_DESIGN:
+		mutex_lock(&fuelgauge->fg_lock);
 		pr_info("%s: capacity_max changed, %d -> %d\n",
 			__func__, fuelgauge->capacity_max, val->intval);
 		fuelgauge->capacity_max =
 			max77705_fg_check_capacity_max(fuelgauge, val->intval);
 		fuelgauge->initial_update_of_soc = true;
+		mutex_unlock(&fuelgauge->fg_lock);
 		break;
 #if defined(CONFIG_BATTERY_AGE_FORECAST)
 	case POWER_SUPPLY_PROP_CAPACITY_LEVEL:

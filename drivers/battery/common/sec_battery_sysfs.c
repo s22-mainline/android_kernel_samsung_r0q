@@ -2309,7 +2309,7 @@ ssize_t sec_bat_store_attrs(
 			pr_info("%s : lcd_status (%d)\n", __func__, battery->lcd_status);
 
 			if (battery->wc_tx_enable || battery->pdata->wpc_vout_ctrl_lcd_on ||
-				battery->vpdo_src_auth || battery->fpdo_src_auth) {
+				(battery->d2d_auth == D2D_AUTH_SRC)) {
 				battery->polling_short = false;
 				__pm_stay_awake(battery->monitor_ws);
 				queue_delayed_work(battery->monitor_wqueue,

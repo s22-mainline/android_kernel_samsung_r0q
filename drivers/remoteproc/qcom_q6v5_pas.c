@@ -40,6 +40,7 @@
 #define SENSOR_SUPPLY_NAME "sensor_vdd"
 #define SENSOR_IO_SUPPLY_NAME "sensor_vddio"
 #define SUBSENSOR_SUPPLY_NAME "subsensor_vdd"
+#define PROX_VDD_NAME "prox_vdd"
 #endif
 
 static struct icc_path *scm_perf_client;
@@ -50,6 +51,7 @@ bool timeout_disabled;
 static int sensor_supply_reg_idx = -1;
 static int sensor_io_supply_reg_idx = -1;
 static int subsensor_supply_reg_idx = -1;
+static int prox_vdd_reg_idx = -1;
 #endif
 
 struct adsp_data {
@@ -486,6 +488,15 @@ static void disable_regulators_sensor_vdd(struct qcom_adsp *adsp)
 		regulator_set_load(adsp->regs[subsensor_supply_reg_idx].reg, 0);
 		regulator_disable(adsp->regs[subsensor_supply_reg_idx].reg);
 	}
+
+	if (prox_vdd_reg_idx > 0) {
+		dev_info(adsp->dev, "%s Regulator disable: %s %d uV %d uA\n", __func__,
+			adsp->info_name, adsp->regs[prox_vdd_reg_idx].uV,
+			adsp->regs[prox_vdd_reg_idx].uA);
+		regulator_set_voltage(adsp->regs[prox_vdd_reg_idx].reg, 0, INT_MAX);
+		regulator_set_load(adsp->regs[prox_vdd_reg_idx].reg, 0);
+		regulator_disable(adsp->regs[prox_vdd_reg_idx].reg);
+	}
 }
 #endif
 
@@ -498,7 +509,8 @@ static void disable_regulators(struct qcom_adsp *adsp)
 		if (!strcmp(adsp->info_name, "slpi")) {
 			if ((i == sensor_supply_reg_idx)
 				|| (i == sensor_io_supply_reg_idx)
-				|| (i == subsensor_supply_reg_idx)) {
+				|| (i == subsensor_supply_reg_idx)
+				|| (i == prox_vdd_reg_idx)) {
 				dev_info(adsp->dev, "skip disabling %s, idx: %d",
 					SENSOR_SUPPLY_NAME, i);
 				continue;
@@ -516,17 +528,6 @@ static int enable_regulators(struct qcom_adsp *adsp)
 	int i, rc = 0;
 
 	for (i = 0; i < adsp->reg_cnt; i++) {
-#if IS_ENABLED(CONFIG_SEC_SENSORS_SSC)
-		if (!strcmp(adsp->info_name, "slpi")) {
-			if ((i == sensor_supply_reg_idx)
-				|| (i == sensor_io_supply_reg_idx)
-				|| (i == subsensor_supply_reg_idx)) {
-				dev_info(adsp->dev, "%s Regulator enable: %s %d uV %d uA\n", __func__,
-							adsp->info_name, adsp->regs[sensor_io_supply_reg_idx].uV,
-							adsp->regs[sensor_io_supply_reg_idx].uA);
-			}
-		}
-#endif
 		regulator_set_voltage(adsp->regs[i].reg, adsp->regs[i].uV, INT_MAX);
 		regulator_set_load(adsp->regs[i].reg, adsp->regs[i].uA);
 		rc = regulator_enable(adsp->regs[i].reg);
@@ -785,6 +786,22 @@ static int adsp_init_regulator(struct qcom_adsp *adsp)
 
 		adsp->regs[i].reg = devm_regulator_get(adsp->dev, reg_name);
 		if (IS_ERR(adsp->regs[i].reg)) {
+#ifdef CONFIG_SEC_FACTORY
+#if IS_ENABLED(CONFIG_SEC_SENSORS_SSC)
+			if (!strcmp(reg_name, SUBSENSOR_SUPPLY_NAME)) {
+				dev_info(adsp->dev, "%s ignore %s %d\n",
+					__func__, SUBSENSOR_SUPPLY_NAME, adsp->reg_cnt--);
+				return 0;
+			}
+#endif
+#endif
+#if IS_ENABLED(CONFIG_SEC_SENSORS_SSC)
+			if (!strcmp(reg_name, PROX_VDD_NAME)) {
+				dev_info(adsp->dev, "%s ignore %s %d\n",
+					__func__, PROX_VDD_NAME, adsp->reg_cnt--);
+				return 0;
+			}
+#endif
 			dev_err(adsp->dev, "failed to get %s reg\n", reg_name);
 			return PTR_ERR(adsp->regs[i].reg);
 		}
@@ -819,6 +836,10 @@ static int adsp_init_regulator(struct qcom_adsp *adsp)
 		if (!strcmp(reg_name, SUBSENSOR_SUPPLY_NAME)) {
 			dev_info(adsp->dev, "found %s, idx: %d\n", reg_name, i);
 			subsensor_supply_reg_idx = i;
+		}
+		if (!strcmp(reg_name, PROX_VDD_NAME)) {
+			dev_info(adsp->dev, "found %s, idx: %d\n", reg_name, i);
+			prox_vdd_reg_idx = i;
 		}
 #endif
 	}

@@ -447,11 +447,11 @@ static const struct qc_rbcmd_cmd qc_rbcmd_template[] = {
 				   RESTART_REASON_NORMAL),
 	SEC_QC_RBCMD_SIMPLE_STRICT("erase_param_quest",
 				   PON_RESTART_REASON_QUEST_ERASE_PARAM,
-				   RESTART_REASON_NORMAL),						   
+				   RESTART_REASON_NORMAL),
 
 	SEC_QC_RBCMD_SIMPLE_STRICT("recovery-update",
 				   PON_RESTART_REASON_RECOVERY_UPDATE,
-				   RESTART_REASON_NORMAL),						   
+				   RESTART_REASON_NORMAL),
 	/* NOTE: these commands are pre-defined int the 'qcom-reboot-reason.c' file.
 	 * In cases of these, this driver only update 'sec_rr' value
 	 * which is only used for SAMSUNG internal.

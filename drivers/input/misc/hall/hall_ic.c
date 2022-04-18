@@ -598,7 +598,7 @@ static int hall_ic_resume(struct device *dev)
 
 		state ^= hall->active_low;
 		pr_info("%s %s %s(%d)\n", __func__, hall->name,
-			hall->state ? "open" : "close", hall->state);
+			state ? "close" : "open", hall->state);
 		disable_irq_wake(hall->irq);
 		input_report_switch(hall->input, hall->event, state);
 		input_sync(hall->input);

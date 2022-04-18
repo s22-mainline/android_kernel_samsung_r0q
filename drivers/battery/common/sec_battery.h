@@ -768,9 +768,7 @@ struct sec_battery_info {
 
 	bool hv_pdo;
 	bool update_pd_list;
-	bool fpdo_src_auth;
-	bool vpdo_src_auth;
-	bool vpdo_snk_auth;
+	int d2d_auth;
 	bool vpdo_src_boost;
 	bool vpdo_ocp;
 	int vpdo_auth_stat;

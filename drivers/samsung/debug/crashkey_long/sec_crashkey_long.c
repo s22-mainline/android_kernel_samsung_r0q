@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2019-2020 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2019-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #define pr_fmt(fmt)     KBUILD_MODNAME ":%s() " fmt, __func__
@@ -13,6 +13,7 @@
 #include <linux/module.h>
 #include <linux/notifier.h>
 #include <linux/of.h>
+#include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/pm_wakeup.h>
 #include <linux/slab.h>
@@ -20,6 +21,7 @@
 #include <linux/version.h>
 
 #include <linux/samsung/builder_pattern.h>
+#include <linux/samsung/of_early_populate.h>
 #include <linux/samsung/bsp/sec_key_notifier.h>
 #include <linux/samsung/debug/sec_debug.h>
 #include <linux/samsung/debug/sec_crashkey_long.h>
@@ -338,7 +340,7 @@ static int __crashkey_long_parse_dt_used_key(struct builder *bd,
 	return 0;
 }
 
-static struct dt_builder __crashkey_long_dt_builder[] = {
+static const struct dt_builder __crashkey_long_dt_builder[] = {
 	DT_BUILDER(__crashkey_long_parse_dt_panic_msg),
 	DT_BUILDER(__crashkey_long_parse_dt_expire_msec),
 	DT_BUILDER(__crashkey_long_parse_dt_used_key),
@@ -478,7 +480,7 @@ static void __crashkey_long_remove_prolog(struct builder *bd)
 }
 
 static int __crashkey_long_probe(struct platform_device *pdev,
-		struct dev_builder *builder, ssize_t n)
+		const struct dev_builder *builder, ssize_t n)
 {
 	struct device *dev = &pdev->dev;
 	struct crashkey_long_drvdata *drvdata;
@@ -493,7 +495,7 @@ static int __crashkey_long_probe(struct platform_device *pdev,
 }
 
 static int __crashkey_long_remove(struct platform_device *pdev,
-		struct dev_builder *builder, ssize_t n)
+		const struct dev_builder *builder, ssize_t n)
 {
 	struct crashkey_long_drvdata *drvdata = platform_get_drvdata(pdev);
 
@@ -550,7 +552,7 @@ static int __crashkey_long_mock_install_keyboard_notifier(struct builder *bd)
 	return 0;
 }
 
-static struct dev_builder __crashkey_long_mock_dev_builder[] = {
+static const struct dev_builder __crashkey_long_mock_dev_builder[] = {
 	DEVICE_BUILDER(__crashkey_long_mock_parse_dt_expire_msec, NULL),
 	DEVICE_BUILDER(__crashkey_long_mock_parse_dt_used_key, NULL),
 	DEVICE_BUILDER(__crashkey_long_probe_prolog, NULL),
@@ -574,7 +576,7 @@ int kunit_crashkey_long_mock_remove(struct platform_device *pdev)
 }
 #endif
 
-static struct dev_builder __crashkey_long_dev_builder[] = {
+static const struct dev_builder __crashkey_long_dev_builder[] = {
 	DEVICE_BUILDER(__crashkey_long_parse_dt, NULL),
 	DEVICE_BUILDER(__crashkey_long_probe_prolog, NULL),
 	DEVICE_BUILDER(__crashkey_long_alloc_bitmap_received,
@@ -616,7 +618,17 @@ static struct platform_driver sec_crashkey_long_driver = {
 
 static int __init sec_crashkey_long_init(void)
 {
-	return platform_driver_register(&sec_crashkey_long_driver);
+	int err;
+
+	err = platform_driver_register(&sec_crashkey_long_driver);
+	if (err)
+		return err;
+
+	err = __of_platform_early_populate_init(sec_crashkeylong_match_table);
+	if (err)
+		return err;
+
+	return 0;
 }
 core_initcall_sync(sec_crashkey_long_init);
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2020 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2020-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #define pr_fmt(fmt)	KBUILD_MODNAME ":%s() " fmt, __func__
@@ -12,11 +12,13 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/of.h>
+#include <linux/of_platform.h>
 #include <linux/platform_device.h>
 
 #include <trace/hooks/debug.h>
 
 #include <linux/samsung/builder_pattern.h>
+#include <linux/samsung/of_early_populate.h>
 #include <linux/samsung/debug/sec_arm64_ap_context.h>
 #include <linux/samsung/debug/sec_debug_region.h>
 
@@ -37,8 +39,7 @@ struct ap_context_drvdata {
 };
 
 enum {
-	TYPE_VH_SHOW_REGS = 0,
-	TYPE_VH_IPI_STOP,
+	TYPE_VH_IPI_STOP = 0,
 	/* */
 	TYPE_VH_MAX,
 	TYPE_VH_UNKNOWN = -EINVAL,
@@ -158,9 +159,6 @@ static ssize_t __ap_context_unique_id_to_type(uint32_t unique_id)
 	ssize_t type;
 
 	switch (unique_id) {
-	case SEC_ARM64_VH_SHOW_REGS_MAGIC:
-		type = TYPE_VH_SHOW_REGS;
-		break;
 	case SEC_ARM64_VH_IPI_STOP_MAGIC:
 		type = TYPE_VH_IPI_STOP;
 		break;
@@ -198,7 +196,7 @@ static int __ap_context_parse_dt_unique_id(struct builder *bd,
         return 0;
 }
 
-static struct dt_builder __ap_context_dt_builder[] = {
+static const struct dt_builder __ap_context_dt_builder[] = {
 	DT_BUILDER(__ap_context_parse_dt_name),
 	DT_BUILDER(__ap_context_parse_dt_unique_id),
 };
@@ -251,9 +249,9 @@ static void __ap_context_free_client(struct builder *bd)
 	sec_dbg_region_free(drvdata->client);
 }
 
-static void __trace_android_vh_show_regs(void *unused, struct pt_regs *regs)
+static void __trace_android_vh_ipi_stop(void *unused, struct pt_regs *regs)
 {
-	struct sec_arm64_ap_context *__ctx = ap_context[TYPE_VH_SHOW_REGS];
+	struct sec_arm64_ap_context *__ctx = ap_context[TYPE_VH_IPI_STOP];
 	int cpu = smp_processor_id();
 	struct sec_arm64_ap_context *ctx = &__ctx[cpu];
 
@@ -268,33 +266,6 @@ static void __trace_android_vh_show_regs(void *unused, struct pt_regs *regs)
 
 	pr_emerg("context saved (CPU:%d)\n", cpu);
 }
-
-static void __trace_android_vh_ipi_stop(void *unused, struct pt_regs *regs)
-{
-	struct sec_arm64_ap_context *__ctx = ap_context[TYPE_VH_IPI_STOP];
-	int cpu = smp_processor_id();
-	struct sec_arm64_ap_context *ctx = &__ctx[cpu];
-
-	if (ctx->used)
-		return;
-
-	__ap_context_save_core_regs_on_current(&ctx->core_regs);
-	__ap_context_save_core_extra_regs(ctx);
-	__ap_context_save_mmu_regs(ctx);
-
-	ctx->used = true;
-
-	pr_emerg("context saved (CPU:%d)\n", cpu);
-}
-
-/* NOTE: commit 802f3427132ac1d3ebbde92d6712f35960cc8354 is not merged into
- * android12-5.10
- */
-#define	register_trace_android_vh_show_regs(__probe, __data) \
-		register_trace_android_vh_ipi_stop(__probe, __data)
-
-#define	unregister_trace_android_vh_show_regs(__probe, __data) \
-		unregister_trace_android_vh_ipi_stop(__probe, __data)
 
 static int __ap_context_register_vh(struct builder *bd)
 {
@@ -311,10 +282,6 @@ static int __ap_context_register_vh(struct builder *bd)
 	case TYPE_VH_IPI_STOP:
 		err = register_trace_android_vh_ipi_stop(
 				__trace_android_vh_ipi_stop, NULL);
-		break;
-	case TYPE_VH_SHOW_REGS:
-		err = register_trace_android_vh_show_regs(
-				__trace_android_vh_show_regs, NULL);
 		break;
 	default:
 		err = -EINVAL;
@@ -340,10 +307,6 @@ static void __ap_context_unregister_vh(struct builder *bd)
 	case TYPE_VH_IPI_STOP:
 		unregister_trace_android_vh_ipi_stop(
 				__trace_android_vh_ipi_stop, NULL);
-		break;
-	case TYPE_VH_SHOW_REGS:
-		unregister_trace_android_vh_show_regs(
-				__trace_android_vh_show_regs, NULL);
 		break;
 	default:
 		dev_warn(dev, "%zd is not a valid vendor hook\n", type);
@@ -499,7 +462,7 @@ static void __ap_context_unregister_die_notifier(struct builder *bd)
 }
 
 static int __ap_context_probe(struct platform_device *pdev,
-		struct dev_builder *builder, ssize_t n)
+		const struct dev_builder *builder, ssize_t n)
 {
 	struct device *dev = &pdev->dev;
 	struct ap_context_drvdata *drvdata;
@@ -514,7 +477,7 @@ static int __ap_context_probe(struct platform_device *pdev,
 }
 
 static int __ap_context_remove(struct platform_device *pdev,
-		struct dev_builder *builder, ssize_t n)
+		const struct dev_builder *builder, ssize_t n)
 {
 	struct ap_context_drvdata *drvdata = platform_get_drvdata(pdev);
 
@@ -523,7 +486,7 @@ static int __ap_context_remove(struct platform_device *pdev,
 	return 0;
 }
 
-static struct dev_builder __ap_context_dev_builder[] = {
+static const struct dev_builder __ap_context_dev_builder[] = {
 	DEVICE_BUILDER(__ap_context_parse_dt, NULL),
 	DEVICE_BUILDER(__ap_context_alloc_client, __ap_context_free_client),
 	DEVICE_BUILDER(__ap_context_register_vh, __ap_context_unregister_vh),
@@ -562,9 +525,23 @@ static struct platform_driver sec_ap_context_driver = {
 
 static int __init sec_ap_context_init(void)
 {
-	return platform_driver_register(&sec_ap_context_driver);
+	int err;
+
+	err = platform_driver_register(&sec_ap_context_driver);
+	if (err)
+		return err;
+
+	err = __of_platform_early_populate_init(sec_ap_context_match_table);
+	if (err)
+		return err;
+
+	return 0;
 }
+#if IS_BUILTIN(CONFIG_SEC_ARM64_AP_CONTEXT)
+arch_initcall_sync(sec_ap_context_init);
+#else
 module_init(sec_ap_context_init);
+#endif
 
 static void __exit sec_ap_context_exit(void)
 {

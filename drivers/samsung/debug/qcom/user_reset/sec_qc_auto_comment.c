@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2006-2021 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2016-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #define pr_fmt(fmt)     KBUILD_MODNAME ":%s() " fmt, __func__
@@ -11,7 +11,6 @@
 #include <linux/proc_fs.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-#include <linux/vmalloc.h>
 
 #include <linux/samsung/debug/qcom/sec_qc_dbg_partition.h>
 
@@ -53,14 +52,21 @@ static int __auto_comment_prepare_buf(
 {
 	char *buf;
 	int ret = 0;
+	ssize_t size;
 
-	buf = vmalloc(SEC_DEBUG_AUTO_COMMENT_SIZE);
+	size = sec_qc_dbg_part_get_size(debug_index_auto_comment);
+	if (size <= 0) {
+		ret = -EINVAL;
+		goto err_get_size;
+	}
+
+	buf = kvmalloc(size, GFP_KERNEL);
 	if (!buf) {
 		ret = -ENOMEM;
 		goto err_nomem;
 	}
 
-	if (!sec_qc_dbg_part_read(debug_index_auto_comment, buf)) {
+	if (!sec_qc_dbg_part_read(size, buf)) {
 		ret = -ENXIO;
 		goto failed_to_read;
 	}
@@ -70,15 +76,16 @@ static int __auto_comment_prepare_buf(
 	return 0;
 
 failed_to_read:
-	vfree(buf);
+	kvfree(buf);
 err_nomem:
+err_get_size:
 	return ret;
 }
 
 static void __auto_comment_release_buf(
 		struct qc_user_reset_proc *auto_comment)
 {
-	vfree(auto_comment->buf);
+	kvfree(auto_comment->buf);
 	auto_comment->buf = NULL;
 }
 

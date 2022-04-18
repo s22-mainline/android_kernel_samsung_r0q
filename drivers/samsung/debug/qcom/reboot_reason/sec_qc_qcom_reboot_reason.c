@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2020 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2020-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 /* NOTE: This file is a counter part of QC's
@@ -61,7 +61,7 @@ static int __qc_reboot_reason_parse_dt_reboot_notifier_priority(
 	return 0;
 }
 
-static struct dt_builder __qc_reboot_reason_dt_builder[] = {
+static const struct dt_builder __qc_reboot_reason_dt_builder[] = {
 	DT_BUILDER(__qc_reboot_reason_parse_dt_reboot_notifier_priority),
 };
 
@@ -327,7 +327,7 @@ static int __qc_reboot_reason_remove(struct platform_device *pdev,
 	return 0;
 }
 
-static struct dev_builder __qc_reboot_reason_dev_builder[] = {
+static const struct dev_builder __qc_reboot_reason_dev_builder[] = {
 	DEVICE_BUILDER(__qc_reboot_reason_parse_dt, NULL),
 	DEVICE_BUILDER(__qc_reboot_reason_probe_prolog,
 		       __qc_reboot_reason_remove_epilog),

@@ -29,6 +29,9 @@ struct sec_vib_inputff_ops {
 	int (*erase)(struct input_dev *dev, int effect_id);
 	int (*get_i2s_test)(struct input_dev *dev);
 	int (*fw_load)(struct input_dev *dev, unsigned int fw_id);
+	int (*set_trigger_cal)(struct input_dev *dev, u32 val);
+	u32 (*get_f0_measured)(struct input_dev *dev);
+	u32 (*set_f0_stored)(struct input_dev *dev, u32 val);
 };
 
 struct sec_vib_inputff_fwdata {
@@ -36,7 +39,6 @@ struct sec_vib_inputff_fwdata {
 	int retry;
 	int ret[FWLOAD_TRY];
 	int stat;
-	bool load_success;
 	struct workqueue_struct *fw_workqueue;
 	struct work_struct wk;
 	struct delayed_work retry_wk;
@@ -61,6 +63,7 @@ struct sec_vib_inputff_drvdata {
 	void *private_data;
 	int temperature;
 	int ach_percent;
+	u32 f0_stored;
 	int support_fw;
 	struct sec_vib_inputff_fwdata fw;
 };

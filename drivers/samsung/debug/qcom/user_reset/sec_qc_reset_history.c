@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2006-2021 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2016-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #define pr_fmt(fmt)     KBUILD_MODNAME ":%s() " fmt, __func__
@@ -12,7 +12,6 @@
 #include <linux/proc_fs.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-#include <linux/vmalloc.h>
 
 #include <linux/samsung/debug/qcom/sec_qc_dbg_partition.h>
 #include <linux/samsung/debug/qcom/sec_qc_rbcmd.h>
@@ -70,12 +69,11 @@ static inline void __reset_history_trim_context(struct history_data *history)
 }
 
 static size_t __reset_history_copy(char *dst, char *src,
-		size_t history_count)
+		size_t max_size, size_t history_count)
 {
 	size_t nr_history = history_count >= SEC_DEBUG_RESET_HISTORY_MAX_CNT ?
 			SEC_DEBUG_RESET_HISTORY_MAX_CNT : history_count;
 	struct history_data *history = (void *)src;
-	const size_t sz_buf = SEC_DEBUG_RESET_HISTORY_SIZE;
 	size_t written = 0;
 	size_t i;
 
@@ -84,12 +82,11 @@ static size_t __reset_history_copy(char *dst, char *src,
 				SEC_DEBUG_RESET_HISTORY_MAX_CNT;
 
 		__reset_history_trim_context(&history[idx]);
-		written += scnprintf(&dst[written], sz_buf - written, "%s\n\n\n",
+		written += scnprintf(&dst[written], max_size - written, "%s\n\n\n",
 				history[idx].context);
 	}
 
-	return written > SEC_DEBUG_RESET_HISTORY_SIZE ?
-			SEC_DEBUG_RESET_HISTORY_SIZE : written;
+	return written > max_size ? max_size : written;
 }
 
 static int __reset_history_prepare_buf(struct qc_user_reset_proc *reset_history)
@@ -99,9 +96,16 @@ static int __reset_history_prepare_buf(struct qc_user_reset_proc *reset_history)
 	char *buf_raw;
 	char *buf;
 	int ret = 0;
+	ssize_t size;
 
-	buf_raw = vmalloc(SEC_DEBUG_RESET_HISTORY_SIZE);
-	buf = vmalloc(SEC_DEBUG_RESET_HISTORY_SIZE);
+	size = sec_qc_dbg_part_get_size(debug_index_reset_history);
+	if (size <= 0) {
+		ret = -EINVAL;
+		goto err_get_size;
+	}
+
+	buf_raw = kvmalloc(size, GFP_KERNEL);
+	buf = kvmalloc(size, GFP_KERNEL);
 	if (!buf_raw || !buf) {
 		ret = -ENOMEM;
 		goto err_nomem;
@@ -112,25 +116,26 @@ static int __reset_history_prepare_buf(struct qc_user_reset_proc *reset_history)
 		goto failed_to_read;
 	}
 
-	reset_history->len = __reset_history_copy(buf, buf_raw,
+	reset_history->len = __reset_history_copy(buf, buf_raw, size,
 			reset_header->reset_history_cnt);
 	reset_history->buf = buf;
 
-	vfree(buf_raw);
+	kvfree(buf_raw);
 
 	return 0;
 
 failed_to_read:
 err_nomem:
-	vfree(buf_raw);
-	vfree(buf);
+	kvfree(buf_raw);
+	kvfree(buf);
+err_get_size:
 	return ret;
 }
 
 static void __reset_history_release_buf(
 		struct qc_user_reset_proc *reset_history)
 {
-	vfree(reset_history->buf);
+	kvfree(reset_history->buf);
 	reset_history->buf = NULL;
 }
 

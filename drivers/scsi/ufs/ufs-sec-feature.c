@@ -881,7 +881,7 @@ void ufs_set_sec_features(struct ufs_hba *hba)
 	ufs_sec_contextid_probe(hba);
 	ufs_sec_streamid_probe(hba, desc_buf);
 
-	ufs_sysfs_add_sec_nodes(hba);
+	ufs_sec_add_sysfs_nodes(hba);
 
 	atomic_notifier_chain_register(&panic_notifier_list,
 			&ufs_sec_panic_notifier);
@@ -905,7 +905,7 @@ void ufs_sec_feature_config(struct ufs_hba *hba)
 
 void ufs_remove_sec_features(struct ufs_hba *hba)
 {
-	ufs_sysfs_remove_sec_nodes(hba);
+	ufs_sec_remove_sysfs_nodes(hba);
 }
 
 /* check error info : begin */

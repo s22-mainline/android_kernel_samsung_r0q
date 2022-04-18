@@ -2327,7 +2327,6 @@ static int samsung_get_i2s_test(struct input_dev *dev)
 	int ret = 0;
 	u32 vmon;
 
-	dev_info(cs40l26->dev, "%s enter\n", __func__);
 	ret = pm_runtime_get_sync(cs40l26->dev);
 	if (ret < 0) {
 		dev_err(cs40l26->dev, "%s: PM Runtime Resume failed(%d)\n",
@@ -2353,11 +2352,115 @@ static int samsung_get_i2s_test(struct input_dev *dev)
 
 	if (samsung_is_valid_vmon(cs40l26, vmon))
 		ret = 1;
-	dev_info(cs40l26->dev, "%s, vmon : %u, ret : %d\n", __func__, vmon, ret);
+	dev_info(cs40l26->dev, "%s, vmon : %u, ret : %d done\n", __func__, vmon, ret);
 pm_err:
 	pm_runtime_mark_last_busy(cs40l26->dev);
 	pm_runtime_put_autosuspend(cs40l26->dev);
 
+	return ret;
+}
+
+static int samsung_set_trigger_cal(struct input_dev *dev, u32 val)
+{
+	struct cs40l26_private *cs40l26 = input_get_drvdata(dev);
+	u32 mailbox_command;
+	int ret;
+
+	if (val < 1 || val > 2) {
+		dev_err(cs40l26->dev, "%s: %u is out of range\n", __func__, val);
+		return -EINVAL;
+	}
+
+	mailbox_command = ((CS40L26_DSP_MBOX_CMD_INDEX_CALIBRATION_CONTROL <<
+				CS40L26_DSP_MBOX_CMD_INDEX_SHIFT) &
+				CS40L26_DSP_MBOX_CMD_INDEX_MASK) |
+				(val & CS40L26_DSP_MBOX_CMD_PAYLOAD_MASK);
+
+	pm_runtime_get_sync(cs40l26->dev);
+	mutex_lock(&cs40l26->lock);
+
+	ret = cs40l26_ack_write(cs40l26, CS40L26_DSP_VIRTUAL1_MBOX_1,
+		mailbox_command, CS40L26_DSP_MBOX_RESET);
+
+	if (ret < 0) {
+		dev_err(cs40l26->dev, "%s is return error : %d\n", __func__, ret);
+		cs40l26->cal_requested = 0;
+	} else {
+		cs40l26->cal_requested = val;
+	}
+	dev_info(cs40l26->dev, "%s: cal_requested : %u", __func__, cs40l26->cal_requested);
+	mutex_unlock(&cs40l26->lock);
+	return ret;
+}
+
+static u32 samsung_get_f0_measured(struct input_dev *dev)
+{
+	struct cs40l26_private *cs40l26 = input_get_drvdata(dev);
+	int ret;
+	u32 reg, f0_measured;
+
+	pm_runtime_get_sync(cs40l26->dev);
+	mutex_lock(&cs40l26->lock);
+
+	ret = cl_dsp_get_reg(cs40l26->dsp, "F0_EST",
+			CL_DSP_XM_UNPACKED_TYPE, CS40L26_F0_EST_ALGO_ID, &reg);
+	if (ret) {
+		dev_err(cs40l26->dev, "%s is return error : %d\n", __func__, ret);
+		goto err_mutex;
+	}
+
+	ret = regmap_read(cs40l26->regmap, reg, &f0_measured);
+	if (ret) {
+		dev_err(cs40l26->dev, "%s is return error : %d\n", __func__, ret);
+		goto err_mutex;
+	}
+	dev_info(cs40l26->dev, "%s: f0_measured : %u", __func__, f0_measured);
+err_mutex:
+	mutex_unlock(&cs40l26->lock);
+	pm_runtime_mark_last_busy(cs40l26->dev);
+	pm_runtime_put_autosuspend(cs40l26->dev);
+
+	if (ret < 0) {
+		dev_err(cs40l26->dev, "%s is return error : %d\n", __func__, ret);
+		return 0;
+	} else
+		return f0_measured;
+}
+
+static u32 samsung_set_f0_stored(struct input_dev *dev, u32 val)
+{
+	struct cs40l26_private *cs40l26 = input_get_drvdata(dev);
+	int ret;
+	u32 reg;
+
+	if (val < CS40L26_SAMSUNG_F0_MIN || val > CS40L26_SAMSUNG_F0_MAX) {
+		dev_err(cs40l26->dev, "%s: %u is out of range\n", __func__, val);
+		return -EINVAL;
+	}
+
+	pm_runtime_get_sync(cs40l26->dev);
+	mutex_lock(&cs40l26->lock);
+
+	ret = cl_dsp_get_reg(cs40l26->dsp, "F0_OTP_STORED",
+			CL_DSP_XM_UNPACKED_TYPE, CS40L26_VIBEGEN_ALGO_ID, &reg);
+	if (ret) {
+		dev_err(cs40l26->dev, "%s is return error : %d\n", __func__, ret);
+		goto err_mutex;
+	}
+
+	ret = regmap_write(cs40l26->regmap, reg, val);
+	if (ret) {
+		dev_err(cs40l26->dev, "%s is return error : %d\n", __func__, ret);
+		goto err_mutex;
+	}
+	dev_info(cs40l26->dev, "%s: f0 val : %u", __func__, val);
+err_mutex:
+	mutex_unlock(&cs40l26->lock);
+	pm_runtime_mark_last_busy(cs40l26->dev);
+	pm_runtime_put_autosuspend(cs40l26->dev);
+
+	if (ret < 0)
+		dev_err(cs40l26->dev, "%s is return error : %d\n", __func__, ret);
 	return ret;
 }
 
@@ -2389,8 +2492,6 @@ static int samsung_fw_load(struct input_dev *dev, unsigned int fw_id)
 	struct cs40l26_private *cs40l26 = input_get_drvdata(dev);
 	int ret = 0;
 
-	dev_info(cs40l26->dev, "%s fw_id : %d +\n", __func__, fw_id);
-
 	cs40l26->busy_state = 1;
 	if (fw_id == 0)
 		ret = cs40l26_fw_swap(cs40l26, CS40L26_FW_ID);
@@ -2407,7 +2508,8 @@ static int samsung_fw_load(struct input_dev *dev, unsigned int fw_id)
 			dev_err(cs40l26->dev, "%s HW Reset Failed\n", __func__);
 	}
 	cs40l26->busy_state = 0;
-	dev_info(cs40l26->dev, "%s -\n", __func__);
+
+	dev_info(cs40l26->dev, "%s fw_id : %d done\n", __func__, fw_id);
 
 	return ret;
 }
@@ -2415,9 +2517,7 @@ static int samsung_fw_load(struct input_dev *dev, unsigned int fw_id)
 static void samsung_recovery(struct cs40l26_private *cs40l26)
 {
 	int ret = 0, i = 0;
-
-
-	dev_info(cs40l26->dev, "%s +\n", __func__);
+	struct input_dev *dev = cs40l26->sec_vib_ddata.input;
 
 	if (cs40l26->vibe_workqueue) {
 		cancel_work_sync(&cs40l26->vibe_start_work);
@@ -2443,6 +2543,11 @@ static void samsung_recovery(struct cs40l26_private *cs40l26)
 		ret = cs40l26_fw_swap(cs40l26, CS40L26_FW_ID);
 		if (!ret) {
 			pr_info("%s, f/w load success!\n", __func__);
+			if (cs40l26->sec_vib_ddata.f0_stored) {
+				ret = samsung_set_f0_stored(dev, cs40l26->sec_vib_ddata.f0_stored);
+				if (ret < 0)
+					pr_err("%s, samsung_set_f0_stored error : %d\n", __func__, ret);
+			}
 			break;
 		}
 		msleep(100);
@@ -2451,7 +2556,7 @@ static void samsung_recovery(struct cs40l26_private *cs40l26)
 	cs40l26->busy_state = 0;
 	enable_irq(cs40l26->irq);
 
-	dev_info(cs40l26->dev, "%s -\n", __func__);
+	dev_info(cs40l26->dev, "%s done\n", __func__);
 
 }
 
@@ -3701,6 +3806,9 @@ static const struct sec_vib_inputff_ops cs40l26_vib_ops = {
 	.erase = cs40l26_erase_effect,
 	.get_i2s_test = samsung_get_i2s_test,
 	.fw_load = samsung_fw_load,
+	.set_trigger_cal = samsung_set_trigger_cal,
+	.get_f0_measured = samsung_get_f0_measured,
+	.set_f0_stored = samsung_set_f0_stored,
 };
 
 static void samsung_input_data_init(struct cs40l26_private *cs40l26)
@@ -3715,6 +3823,7 @@ static void samsung_input_data_init(struct cs40l26_private *cs40l26)
 	cs40l26->sec_vib_ddata.ff_val = 0;
 	cs40l26->sec_vib_ddata.support_fw = 1;
 	cs40l26->sec_vib_ddata.ach_percent = cs40l26->pdata.asp_scale_pct;
+	cs40l26->sec_vib_ddata.f0_stored = 0;
 	sec_vib_inputff_setbit(&cs40l26->sec_vib_ddata, FF_PERIODIC);
 	sec_vib_inputff_setbit(&cs40l26->sec_vib_ddata, FF_CUSTOM);
 	sec_vib_inputff_setbit(&cs40l26->sec_vib_ddata, FF_SINE);
@@ -3866,9 +3975,19 @@ static int cs40l26_cl_dsp_init(struct cs40l26_private *cs40l26, u32 id)
 		for (i = 0; i < CS40L26_TUNING_FILES_MAX; i++)
 			cs40l26->fw.coeff_files[i] = devm_kzalloc(cs40l26->dev,
 				CS40L26_TUNING_FILE_NAME_MAX_LEN, GFP_KERNEL);
-
+#ifdef CONFIG_CS40L26_SAMSUNG_FEATURE
+		if (cs40l26->pdata.is_f0_tracking)
+			strncpy(cs40l26->fw.coeff_files[0], CS40L26_WT_FILE_F0_NAME,
+					CS40L26_WT_FILE_F0_NAME_LEN);
+		else
+			strncpy(cs40l26->fw.coeff_files[0], CS40L26_WT_FILE_NAME,
+					CS40L26_WT_FILE_NAME_LEN);
+		dev_info(cs40l26->dev, "Using %s, is_f0_tracking : %d\n",
+			cs40l26->fw.coeff_files[0], cs40l26->pdata.is_f0_tracking);
+#else
 		strncpy(cs40l26->fw.coeff_files[0], CS40L26_WT_FILE_NAME,
 				CS40L26_WT_FILE_NAME_LEN);
+#endif
 		strncpy(cs40l26->fw.coeff_files[1],
 				CS40L26_A2H_TUNING_FILE_NAME,
 				CS40L26_A2H_TUNING_FILE_NAME_LEN);
@@ -3884,9 +4003,20 @@ static int cs40l26_cl_dsp_init(struct cs40l26_private *cs40l26, u32 id)
 				CS40L26_DVL_FILE_NAME,
 				CS40L26_DVL_FILE_NAME_LEN);
 #endif
+#ifdef CONFIG_CS40L26_SAMSUNG_FEATURE
+		if (cs40l26->pdata.is_f0_tracking)
+			ret = cl_dsp_wavetable_create(cs40l26->dsp,
+					CS40L26_VIBEGEN_ALGO_ID, CS40L26_WT_NAME_XM,
+					CS40L26_WT_NAME_YM, CS40L26_WT_FILE_F0_NAME);
+		else
+			ret = cl_dsp_wavetable_create(cs40l26->dsp,
+					CS40L26_VIBEGEN_ALGO_ID, CS40L26_WT_NAME_XM,
+					CS40L26_WT_NAME_YM, CS40L26_WT_FILE_NAME);
+#else
 		ret = cl_dsp_wavetable_create(cs40l26->dsp,
 				CS40L26_VIBEGEN_ALGO_ID, CS40L26_WT_NAME_XM,
 				CS40L26_WT_NAME_YM, CS40L26_WT_FILE_NAME);
+#endif
 	}
 
 #ifdef CONFIG_CS40L26_SAMSUNG_FEATURE
@@ -4624,10 +4754,17 @@ static int cs40l26_tuning_select_from_svc_le(struct cs40l26_private *cs40l26)
 				strncpy(svc_bin_file,
 					CS40L26_SVC_TUNING_FILE_PREFIX,
 					CS40L26_SVC_TUNING_FILE_PREFIX_LEN);
-
+#ifdef CONFIG_CS40L26_SAMSUNG_FEATURE
+				if (cs40l26->pdata.is_f0_tracking)
+					strncpy(wt_bin_file, CS40L26_WT_FILE_F0_PREFIX,
+						CS40L26_WT_FILE_F0_PREFIX_LEN);
+				else
+					strncpy(wt_bin_file, CS40L26_WT_FILE_PREFIX,
+						CS40L26_WT_FILE_PREFIX_LEN);
+#else
 				strncpy(wt_bin_file, CS40L26_WT_FILE_PREFIX,
 					CS40L26_WT_FILE_PREFIX_LEN);
-
+#endif
 				snprintf(n_str, 2, "%d",
 						cs40l26->svc_le_vals[j]->n);
 
@@ -4648,9 +4785,19 @@ static int cs40l26_tuning_select_from_svc_le(struct cs40l26_private *cs40l26)
 				CS40L26_TUNING_FILE_SUFFIX_LEN);
 		strncat(wt_bin_file, CS40L26_TUNING_FILE_SUFFIX,
 				CS40L26_TUNING_FILE_SUFFIX_LEN);
-
+#ifdef CONFIG_CS40L26_SAMSUNG_FEATURE
+		if (cs40l26->pdata.is_f0_tracking)
+			strncpy(cs40l26->fw.coeff_files[0], wt_bin_file,
+					CS40L26_WT_FILE_F0_CONCAT_NAME_LEN);
+		else
+			strncpy(cs40l26->fw.coeff_files[0], wt_bin_file,
+					CS40L26_WT_FILE_CONCAT_NAME_LEN);
+		dev_info(cs40l26->dev, "Using %s, is_f0_tracking : %d\n",
+			cs40l26->fw.coeff_files[0], cs40l26->pdata.is_f0_tracking);
+#else
 		strncpy(cs40l26->fw.coeff_files[0], wt_bin_file,
 				CS40L26_WT_FILE_CONCAT_NAME_LEN);
+#endif
 		strncpy(cs40l26->fw.coeff_files[2], svc_bin_file,
 				CS40L26_SVC_TUNING_FILE_NAME_LEN);
 	}
@@ -5057,6 +5204,8 @@ static int cs40l26_handle_platform_data(struct cs40l26_private *cs40l26)
 		cs40l26->pdata.high_temp_percent = val;
 	else
 		cs40l26->pdata.high_temp_percent = CS40L26_SAMSUNG_DEFAULT_HIGH_TEMP_PERCENT;
+
+	cs40l26->pdata.is_f0_tracking = of_property_read_bool(np, "samsung,f0-tracking");
 #endif
 	return 0;
 }

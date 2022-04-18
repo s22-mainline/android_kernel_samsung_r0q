@@ -730,6 +730,38 @@ int nfc_i2c_dev_resume(struct device *device)
 	return 0;
 }
 
+#if IS_ENABLED(CONFIG_SAMSUNG_NFC)
+static void nfc_shutdown(struct i2c_client *client)
+{
+	struct nfc_dev *nfc_dev = i2c_get_clientdata(client);
+
+	if (nfc_dev) {
+		struct platform_gpio *nfc_gpio = &nfc_dev->configs.gpio;
+		struct platform_configs *nfc_configs = &nfc_dev->configs;
+
+		/*
+		 * In case of S.LSI, NFC card mode doesn't work in LPM.
+		 * so, it's skipped on S.LSI models using sn110. it need to be checked
+		 */
+		if (nfc_configs->ap_vendor != AP_VENDOR_SLSI) {
+			if (nfc_configs->ap_vendor == AP_VENDOR_MTK) {
+				/*use internal pull-up case*/
+				struct pinctrl *pinctrl = NULL;
+
+				pinctrl = devm_pinctrl_get_select(&client->dev, "i2c_off");
+				if (IS_ERR_OR_NULL(pinctrl))
+					NFC_LOG_ERR("Failed to pinctrl i2c_off\n");
+				else
+					devm_pinctrl_put(pinctrl);
+				NFC_LOG_ERR("i2c off pinctrl called\n");
+			};
+
+			gpio_direction_output(nfc_gpio->ven, 0);
+		}
+	}
+}
+#endif
+
 #ifdef CONFIG_MAKE_NODE_USING_PLATFORM_DEVICE
 static int nfc_platform_probe(struct platform_device *pdev)
 {
@@ -787,6 +819,9 @@ static struct i2c_driver nfc_i2c_dev_driver = {
 	.id_table = nfc_i2c_dev_id,
 	.probe = nfc_i2c_dev_probe,
 	.remove = nfc_i2c_dev_remove,
+#if IS_ENABLED(CONFIG_SAMSUNG_NFC)
+	.shutdown = nfc_shutdown,
+#endif
 	.driver = {
 		.name = NFC_I2C_DRV_STR,
 		.pm = &nfc_i2c_dev_pm_ops,

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2017-2020 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2017-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #define pr_fmt(fmt)     KBUILD_MODNAME ":%s() " fmt, __func__
@@ -22,6 +22,7 @@
 
 #include <linux/samsung/builder_pattern.h>
 #include <linux/samsung/of_early_populate.h>
+#include <linux/samsung/sec_of.h>
 #include <linux/samsung/debug/sec_debug.h>
 #include <linux/samsung/debug/sec_debug_region.h>
 
@@ -221,41 +222,97 @@ static int __dbg_region_parse_dt_memory_region(struct builder *bd,
 	}
 
 	drvdata->rmem = rmem;
-	drvdata->phys = rmem->base;
-
-	if (!of_property_read_bool(mem_np, "no-map"))
-		drvdata->virt = (unsigned long)phys_to_virt(drvdata->phys);
 
 	return 0;
 }
 
-static int __dbg_region_parse_dt_reserved_size(struct builder *bd,
+static bool __dbg_region_is_in_reserved_mem_bound(
+		const struct reserved_mem *rmem,
+		phys_addr_t base, phys_addr_t size)
+{
+	phys_addr_t rmem_base = rmem->base;
+	phys_addr_t rmem_end = rmem_base + rmem->size - 1;
+	phys_addr_t end = base + size - 1;
+
+	if ((base >= rmem_base) && (end <= rmem_end))
+		return true;
+
+	return false;
+}
+
+static int __dbg_region_use_partial_reserved_mem(
+	struct dbg_region_drvdata *drvdata, struct device_node *np)
+{
+	struct reserved_mem *rmem = drvdata->rmem;
+	phys_addr_t base;
+	phys_addr_t size;
+	int err;
+
+	err = sec_of_parse_reg_prop(np, &base, &size);
+	if (err)
+		return err;
+
+	if (!__dbg_region_is_in_reserved_mem_bound(rmem, base, size))
+		return -ERANGE;
+
+	drvdata->phys = base;
+	drvdata->size = size;
+
+	return 0;
+}
+
+static int __dbg_region_use_entire_reserved_mem(
+	struct dbg_region_drvdata *drvdata)
+{
+	struct reserved_mem *rmem = drvdata->rmem;
+
+	drvdata->phys = rmem->base;
+	drvdata->size = rmem->size;
+
+	return 0;
+}
+
+static int __dbg_region_parse_dt_partial_reserved_mem(struct builder *bd,
 		struct device_node *np)
 {
 	struct dbg_region_drvdata *drvdata =
 			container_of(bd, struct dbg_region_drvdata, bd);
-	struct reserved_mem *rmem = drvdata->rmem;
-	size_t size = rmem->size;
-	u32 reserved_size;
 	int err;
 
-	if (!of_property_read_bool(np, "sec,use-reserved_size"))
-		goto use_by_default;
+	if (of_property_read_bool(np, "sec,use-partial_reserved_mem"))
+		err = __dbg_region_use_partial_reserved_mem(drvdata, np);
+	else
+		err = __dbg_region_use_entire_reserved_mem(drvdata);
 
-	err = of_property_read_u32(np, "sec,reserved_size", &reserved_size);
 	if (err)
-		return -EINVAL;
+		return -EFAULT;
 
-	size = (size_t)reserved_size;
-
-use_by_default:
-	drvdata->size = size;
 	return 0;
 }
 
-static struct dt_builder __dbg_region_dt_builder[] = {
+static int __dbg_region_parse_dt_test_no_map(struct builder *bd,
+		struct device_node *np)
+{
+	struct dbg_region_drvdata *drvdata =
+			container_of(bd, struct dbg_region_drvdata, bd);
+	struct device_node *mem_np;
+
+	mem_np = of_parse_phandle(np, "memory-region", 0);
+	if (!mem_np)
+		return -EINVAL;
+
+	if (!of_property_read_bool(mem_np, "no-map"))
+		drvdata->virt = (unsigned long)phys_to_virt(drvdata->phys);
+	else
+		drvdata->virt = 0x0;
+
+	return 0;
+}
+
+static const struct dt_builder __dbg_region_dt_builder[] = {
 	DT_BUILDER(__dbg_region_parse_dt_memory_region),
-	DT_BUILDER(__dbg_region_parse_dt_reserved_size),
+	DT_BUILDER(__dbg_region_parse_dt_partial_reserved_mem),
+	DT_BUILDER(__dbg_region_parse_dt_test_no_map),
 };
 
 static int __dbg_region_parse_dt(struct builder *bd)
@@ -450,7 +507,7 @@ static void __dbg_region_remove_prolog(struct builder *bd)
 }
 
 static int __dbg_region_probe(struct platform_device *pdev,
-		struct dev_builder *builder, ssize_t n)
+		const struct dev_builder *builder, ssize_t n)
 {
 	struct device *dev = &pdev->dev;
 	struct dbg_region_drvdata *drvdata;
@@ -465,7 +522,7 @@ static int __dbg_region_probe(struct platform_device *pdev,
 }
 
 static int __dbg_region_remove(struct platform_device *pdev,
-		struct dev_builder *builder, ssize_t n)
+		const struct dev_builder *builder, ssize_t n)
 {
 	struct dbg_region_drvdata *drvdata = platform_get_drvdata(pdev);
 
@@ -513,7 +570,7 @@ static void __dbg_region_mock_remove_pool(struct builder *bd)
 	__free_pages(pg, order);
 }
 
-static struct dev_builder __dbg_region_mock_dev_builder[] = {
+static const struct dev_builder __dbg_region_mock_dev_builder[] = {
 	DEVICE_BUILDER(__dbg_region_probe_prolog, NULL),
 	DEVICE_BUILDER(__dbg_region_mock_prepare_pool,
 		       __dbg_region_mock_remove_pool),
@@ -535,7 +592,7 @@ int kunit_dbg_region_mock_remove(struct platform_device *pdev)
 }
 #endif
 
-static struct dev_builder __dbg_region_dev_builder[] = {
+static const struct dev_builder __dbg_region_dev_builder[] = {
 	DEVICE_BUILDER(__dbg_region_parse_dt, NULL),
 	DEVICE_BUILDER(__dbg_region_probe_prolog, __dbg_region_remove_epilog),
 	DEVICE_BUILDER(__dbg_region_prepare_pool, NULL),

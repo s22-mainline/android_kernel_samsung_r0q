@@ -32,7 +32,7 @@ int abc_parse_dt(struct device *dev)
 	np = dev->of_node;
 	pdata->nItem = of_get_child_count(np);
 	if (!pdata->nItem) {
-		dev_err(dev, "There are no items\n");
+		dev_err(dev, "There are no items");
 		return -ENODEV;
 	}
 
@@ -47,7 +47,7 @@ int abc_parse_dt(struct device *dev)
 			return -ENOMEM;
 
 		if (abc_parse_dt_type1(dev, type1_np, idx, spec_type1)) {
-			ABC_PRINT("%s : failed parse dt spec_type1 idx : %d\n", __func__, idx);
+			ABC_PRINT("failed parse dt spec_type1 idx : %d", idx);
 			continue;
 		}
 		list_add_tail(&spec_type1->node, &pdata->abc_spec_list);
@@ -61,9 +61,9 @@ void sec_abc_make_key_data(struct abc_key_data *key_data, char *str)
 	char *event_strings[ABC_UEVENT_MAX] = {0,};
 	char temp[ABC_BUFFER_MAX];
 	char *c, *p;
-	int idx = 0;
+	int idx = 0, i;
 
-	ABC_PRINT("%s : start : %s", __func__, str);
+	ABC_PRINT("start : %s", str);
 
 	strlcpy(temp, str, ABC_BUFFER_MAX);
 	p = temp;
@@ -74,13 +74,33 @@ void sec_abc_make_key_data(struct abc_key_data *key_data, char *str)
 	}
 
 	strlcpy(key_data->event_module, event_strings[0] + 7, ABC_EVENT_STR_MAX);
-	strlcpy(key_data->event_name, event_strings[1] + 5, ABC_EVENT_STR_MAX);
 
 	p = strsep(&event_strings[1], "=");
-	strlcpy(key_data->event_type, p, ABC_TYPE_STR_MAX);
 
-	ABC_PRINT("%s : Module(%s) Level(%s) Event(%s)", __func__,
-			  key_data->event_module, key_data->event_type, key_data->event_name);
+	if (!strncmp(p, "INFO", 4))
+		strlcpy(key_data->event_type, "INFO", ABC_TYPE_STR_MAX);
+	else
+		strlcpy(key_data->event_type, "WARN", ABC_TYPE_STR_MAX);
+
+	p = strsep(&event_strings[1], "=");
+	strlcpy(key_data->event_name, p, ABC_EVENT_STR_MAX);
+
+	for (i = 2; i < idx; i++) {
+		if (!strncmp(event_strings[i], "HOST=", 5)) {
+			p = strstr(event_strings[i], "=");
+			strlcpy(key_data->host_name, p + 1, ABC_EVENT_STR_MAX);
+		} else if (!strncmp(event_strings[i], "EXT_LOG=", 8)) {
+			p = strstr(event_strings[i], "=");
+			strlcpy(key_data->ext_log, p + 1, ABC_EVENT_STR_MAX);
+		}
+	}
+
+	ABC_PRINT("Module(%s) Level(%s) Event(%s) Host(%s) EXT_LOG(%s)",
+			  key_data->event_module,
+			  key_data->event_type,
+			  key_data->event_name,
+			  key_data->host_name,
+			  key_data->ext_log);
 }
 
 struct abc_common_spec_data *sec_abc_get_matched_common_spec(struct abc_key_data *key_data)
@@ -98,32 +118,20 @@ int sec_abc_get_buffer_size_from_th_cnt(int th_max)
 	return min_buffer_size > i ? min_buffer_size : i;
 }
 
-bool sec_abc_is_enabled_error(struct abc_key_data *key_data)
-{
-	struct abc_common_spec_data *common_spec;
-
-	common_spec = sec_abc_get_matched_common_spec(key_data);
-
-	if (!common_spec)
-		return true;
-
-	return (common_spec->enabled == 1) ? true : false;
-}
-
 void sec_abc_enqueue_event_data(struct abc_key_data *key_data, unsigned int cur_time)
 {
 	struct abc_common_spec_data *common_spec = sec_abc_get_matched_common_spec(key_data);
 
 	if (!common_spec || !strcmp(key_data->event_type, "INFO")) {
-		ABC_PRINT("%s : There is no matched buffer.\n", __func__);
+		ABC_PRINT("There is no matched buffer");
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("There is no matched buffer.\n");
+		abc_common_test_get_log_str("There is no matched buffer");
 #endif
 	} else {
-		ABC_PRINT("%s : There is a matched buffer. Enqueue data : %s.\n", __func__, common_spec->error_name);
+		ABC_PRINT("There is a matched buffer. Enqueue data : %s", common_spec->error_name);
 		sec_abc_enqueue_event_data_type1(common_spec, cur_time);
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("There is a matched buffer. Enqueue data.\n");
+		abc_common_test_get_log_str("There is a matched buffer. Enqueue data");
 #endif
 	}
 
@@ -134,15 +142,15 @@ void sec_abc_dequeue_event_data(struct abc_key_data *key_data)
 	struct abc_common_spec_data *common_spec = sec_abc_get_matched_common_spec(key_data);
 
 	if (!common_spec || !strcmp(key_data->event_type, "INFO")) {
-		ABC_PRINT("%s : There is no matched buffer.\n", __func__);
+		ABC_PRINT("There is no matched buffer");
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("There is no matched buffer.\n");
+		abc_common_test_get_log_str("There is no matched buffer");
 #endif
 	} else {
-		ABC_PRINT("%s : There is a matched buffer. Dequeue data : %s.\n", __func__, common_spec->error_name);
+		ABC_PRINT("There is a matched buffer. Dequeue data : %s", common_spec->error_name);
 		sec_abc_dequeue_event_data_type1(common_spec);
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("There is a matched buffer. Dequeue data.\n");
+		abc_common_test_get_log_str("There is a matched buffer. Dequeue data");
 #endif
 	}
 }
@@ -153,39 +161,18 @@ void sec_abc_reset_event_buffer(struct abc_key_data *key_data)
 	struct spec_data_type1 *spec_type1;
 
 	if (!common_spec || !strcmp(key_data->event_type, "INFO")) {
-		ABC_PRINT("%s : There is no matched buffer.\n", __func__);
+		ABC_PRINT("There is no matched buffer");
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("There is no matched buffer.\n");
+		abc_common_test_get_log_str("There is no matched buffer");
 #endif
 	} else {
-		ABC_PRINT("%s : There is a matched buffer. Reset buffer : %s.\n", __func__, common_spec->error_name);
+		ABC_PRINT("There is a matched buffer. Reset buffer : %s", common_spec->error_name);
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("There is a matched buffer. Reset buffer.\n");
+		abc_common_test_get_log_str("There is a matched buffer. Reset buffer");
 #endif
 		spec_type1 = container_of(common_spec, struct spec_data_type1, common_spec);
 		sec_abc_reset_buffer_type1(spec_type1);
 	}
-}
-
-bool sec_abc_reached_spec_pre(struct abc_key_data *key_data, struct abc_pre_event *pre_event)
-{
-	struct abc_common_spec_data *common_spec;
-
-	if (!strcmp(key_data->event_type, "INFO")) {
-		ABC_PRINT("%s : INFO doesn't have spec.\n", __func__);
-		return false;
-	}
-
-	if (!sec_abc_is_enabled_error(key_data)) {
-		ABC_PRINT("%s : %s isn't enabled.\n", __func__, pre_event->abc_str);
-		return false;
-	}
-
-	common_spec = sec_abc_get_matched_common_spec(key_data);
-	if (!common_spec)
-		return true;
-
-	return sec_abc_reached_spec_type1_pre(common_spec, pre_event);
 }
 
 bool sec_abc_reached_spec(struct abc_key_data *key_data, unsigned int cur_time)
@@ -193,7 +180,7 @@ bool sec_abc_reached_spec(struct abc_key_data *key_data, unsigned int cur_time)
 	struct abc_common_spec_data *common_spec;
 
 	if (!strcmp(key_data->event_type, "INFO")) {
-		ABC_PRINT("%s : INFO doesn't have spec.\n", __func__);
+		ABC_PRINT("INFO doesn't have spec");
 		return false;
 	}
 
@@ -204,88 +191,135 @@ bool sec_abc_reached_spec(struct abc_key_data *key_data, unsigned int cur_time)
 	return sec_abc_reached_spec_type1(common_spec, cur_time);
 }
 
-int sec_abc_apply_changed_spec(char *str, int mode)
+void sec_abc_apply_changed_spec(char *str, int mode)
 {
 	struct abc_common_spec_data *common_spec;
 	struct abc_key_data key_data;
 	struct spec_data_type1 *spec_type1;
+	int idx;
 
 	sec_abc_make_key_data(&key_data, str);
+	idx = sec_abc_get_idx_of_registered_event(&key_data);
+
+	if (idx < 0)
+		goto invalid;
+
+	if (abc_event_list[idx].singular_spec && mode > 0)
+		goto invalid;
+
+	abc_event_list[idx].enabled = (mode >= 0) ? true : false;
+
+	if (abc_event_list[idx].singular_spec || !abc_event_list[idx].enabled)
+		goto out;
+
 	common_spec = sec_abc_get_matched_common_spec(&key_data);
 
-	if (!common_spec || common_spec->spec_cnt < mode + 1 || mode < 0) {
-		ABC_PRINT("%s : Invalid change cmd. Check the Input", __func__);
-#if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("Invalid change cmd. Check the Input");
-#endif
-		return -EINVAL;
-	}
+	if (!common_spec || common_spec->spec_cnt < mode + 1)
+		goto invalid;
 
 	spec_type1 = container_of(common_spec, struct spec_data_type1, common_spec);
-
 	common_spec->current_spec = mode;
-	common_spec->enabled = spec_type1->th_cnt[common_spec->current_spec] == SPEC_DISABLED ? 0 : 1;
 	spec_type1->buffer.size = spec_type1->th_cnt[common_spec->current_spec] + 1;
-
 	sec_abc_reset_event_buffer(&key_data);
 
-	ABC_PRINT("%s : MODULE(%s) ERROR(%s) MODE(%d) Enabled(%d)",
-			  __func__, common_spec->module_name,
-			  common_spec->error_name,
-			  common_spec->current_spec,
-			  common_spec->enabled);
+out:
+	ABC_PRINT("MODULE(%s) ERROR(%s) MODE(%d) Enabled(%d)",
+			  key_data.event_module,
+			  key_data.event_name,
+			  mode,
+			  abc_event_list[idx].enabled);
+	return;
 
-	return 0;
+invalid:
+	ABC_PRINT("Invalid change cmd. Check the Input");
+#if IS_ENABLED(CONFIG_SEC_KUNIT)
+	abc_common_test_get_log_str("Invalid change cmd. Check the Input");
+#endif
+}
+
+/* Correct format
+ *
+ *	MODULE=gpu@WARN=gpu_fault@MODE=0
+ *	(MODE must be equal to or greater than zero.)
+ *	MODULE=gpu@WARN=gpu_fault@OFF
+ */
+
+bool sec_abc_is_valid_sysfs_spec_input(char *str, int *mode)
+{
+	char temp[ABC_BUFFER_MAX];
+	char *token[3], *p, *c;
+	int idx = 0, token_cnt = 3;
+
+	strlcpy(temp, str, ABC_BUFFER_MAX);
+	p = temp;
+
+	while ((c = strsep(&p, "@")) != NULL) {
+
+		if (idx >= token_cnt)
+			goto invalid;
+
+		token[idx] = c;
+		idx++;
+	}
+
+	if (idx != token_cnt)
+		goto invalid;
+
+	if (strncmp(token[0], "MODULE=", 7) || !*(token[0] + 7))
+		goto invalid;
+
+	if (strncmp(token[1], "WARN=", 5) || !*(token[0] + 5))
+		goto invalid;
+
+	if (!strncmp(token[2], "MODE=", 5)) {
+
+		if (kstrtoint(token[2] + 5, 0, mode))
+			goto invalid;
+
+		if (*mode < 0)
+			goto invalid;
+
+		goto valid;
+
+	} else if (!strcmp(token[2], "OFF")) {
+		*mode = -1;
+		goto valid;
+	}
+invalid:
+	ABC_PRINT("%s invalid", str);
+	return false;
+valid:
+	ABC_PRINT("%s valid", str);
+	return true;
 }
 
 void sec_abc_change_spec(const char *str)
 {
-	char *cmd_strings[ABC_CMD_MAX];
+	char *cmd_string, *p;
 	char temp[ABC_BUFFER_MAX * 5];
-	char *c, *p, *p2;
-	int idx = 0, mode = -1, len, str_len;
+	int mode = -1, cnt = 0;
 
-	ABC_PRINT("%s : start : %s", __func__, str);
+	ABC_PRINT("start : %s", str);
 
 	strlcpy(temp, str, ABC_BUFFER_MAX * 5);
-
-	str_len = strlen(str);
-
-	if (!str_len) {
-		ABC_PRINT("%s : Empty string!", __func__);
-		return;
-	}
-
-	len = str_len < ABC_BUFFER_MAX * 5 ? str_len : ABC_BUFFER_MAX * 5;
-
-	if (temp[len - 1] == '\n')
-		temp[len - 1] = 0;
-
 	p = temp;
 
-	while ((c = strsep(&p, ",")) != NULL && idx < ABC_CMD_MAX) {
+	while ((cmd_string = strsep(&p, ",\n")) != NULL && cnt < REGISTERED_ABC_EVENT_TOTAL) {
 
-		cmd_strings[idx] = c;
-
-		if (sec_abc_is_valid_abc_string(cmd_strings[idx])) {
-
-			p2 = strstr(cmd_strings[idx], "MODE=");
-
-			if (!p2 || !*(p2 + 5) || kstrtoint(p2 + 5, 0, &mode))
-				continue;
-
-			if (!sec_abc_apply_changed_spec(cmd_strings[idx], mode))
-				idx++;
-
-		} else {
+		if (sec_abc_is_valid_sysfs_spec_input(cmd_string, &mode))
+			sec_abc_apply_changed_spec(cmd_string, mode);
+		else {
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
 			abc_common_test_get_log_str("Invalid change cmd. Check the Input");
 #endif
-			ABC_PRINT("%s : Invalid change cmd. Check the Input", __func__);
+			ABC_PRINT("Invalid change cmd. Check the Input");
+			break;
 
 		}
+		cnt++;
 	}
-	ABC_PRINT("%s : end : %s", __func__, str);
+
+	ABC_PRINT("end : %s", str);
 }
 
 int sec_abc_read_spec(char *buf)
@@ -309,14 +343,14 @@ int sec_abc_read_spec(char *buf)
 		for (i = 0; i < spec_cnt; i++) {
 			len += scnprintf(buf + len, PAGE_SIZE - len, "(SPEC%d ", i);
 			len += scnprintf(buf + len, PAGE_SIZE - len, "THRESHOLD_TIME=%d ",
-			spec_type1->th_time[i] == SPEC_DISABLED ? 0 : spec_type1->th_time[i]);
+							 spec_type1->th_time[i]);
 			len += scnprintf(buf + len, PAGE_SIZE - len, "THRESHOLD_CNT=%d)",
-			spec_type1->th_cnt[i] == SPEC_DISABLED ? 0 : spec_type1->th_cnt[i]);
+							 spec_type1->th_cnt[i]);
 		}
 		len += scnprintf(buf + len, PAGE_SIZE - len, "\n");
 	}
 
-	ABC_PRINT("%s : %d", __func__, len);
+	ABC_PRINT("%d", len);
 	return len;
 }
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2015-2021 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2015-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #include <linux/device.h>
@@ -124,7 +124,7 @@ static int __smem_parse_dt_vendor1_ver(struct builder *bd,
 	return 0;
 }
 
-static struct dt_builder __smem_dt_builder[] = {
+static const struct dt_builder __smem_dt_builder[] = {
 	DT_BUILDER(__smem_parse_dt_vendor0_ver),
 	DT_BUILDER(__smem_parse_dt_vendor1_ver),
 };
@@ -153,7 +153,7 @@ static void __smem_remove_prolog(struct builder *bd)
 }
 
 static int __smem_probe(struct platform_device *pdev,
-		struct dev_builder *builder, ssize_t n)
+		const struct dev_builder *builder, ssize_t n)
 {
 	struct device *dev = &pdev->dev;
 	struct qc_smem_drvdata *drvdata;
@@ -168,7 +168,7 @@ static int __smem_probe(struct platform_device *pdev,
 }
 
 static int __smem_remove(struct platform_device *pdev,
-		struct dev_builder *builder, ssize_t n)
+		const struct dev_builder *builder, ssize_t n)
 {
 	struct qc_smem_drvdata *drvdata = platform_get_drvdata(pdev);
 
@@ -177,7 +177,7 @@ static int __smem_remove(struct platform_device *pdev,
 	return 0;
 }
 
-static struct dev_builder __smem_dev_builder[] = {
+static const struct dev_builder __smem_dev_builder[] = {
 	DEVICE_BUILDER(__smem_test_ap_health, NULL),
 	DEVICE_BUILDER(__smem_test_vendor0, NULL),
 	DEVICE_BUILDER(__smem_test_vendor1, NULL),

@@ -240,7 +240,7 @@ static void test_case_0_simple_strict(struct kunit *test)
 		{ "user_dram_test", PON_RESTART_REASON_USER_DRAM_TEST,
 		  RESTART_REASON_NORMAL },
 		{ "erase_param_quest", PON_RESTART_REASON_QUEST_ERASE_PARAM,
-		  RESTART_REASON_NORMAL },		  
+		  RESTART_REASON_NORMAL },
 	};
 
 	__kunit_qc_rbcmd_test(test, cmd_list, ARRAY_SIZE(cmd_list));

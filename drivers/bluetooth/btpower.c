@@ -953,6 +953,7 @@ static int bt_power_probe(struct platform_device *pdev)
 
 free_pdata:
 	kfree(bt_power_pdata);
+	bt_power_pdata = NULL;
 	return ret;
 }
 

@@ -18,18 +18,26 @@
 static char *lcd_id;
 module_param(lcd_id, charp, S_IRUGO);
 
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
+static char *lcd_id1;
+module_param(lcd_id1, charp, S_IRUGO);
+#endif
+
 struct device *ptsp;
 EXPORT_SYMBOL(ptsp);
 
-static int sec_input_lcd_parse_panel_id(void)
+struct sec_ts_secure_data *psecuretsp = NULL;
+EXPORT_SYMBOL(psecuretsp);
+
+static int sec_input_lcd_parse_panel_id(char *panel_id)
 {
 	char *pt;
 	int lcd_id_p = 0;
 
-	if (IS_ERR_OR_NULL(lcd_id))
+	if (IS_ERR_OR_NULL(panel_id))
 		return lcd_id_p;
 
-	for (pt = lcd_id; *pt != 0; pt++)  {
+	for (pt = panel_id; *pt != 0; pt++)  {
 		lcd_id_p <<= 4;
 		switch (*pt) {
 		case '0' ... '9':
@@ -48,6 +56,9 @@ static int sec_input_lcd_parse_panel_id(void)
 
 int sec_input_get_lcd_id(struct device *dev)
 {
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
+	struct sec_ts_plat_data *pdata = dev->platform_data;
+#endif
 #if !IS_ENABLED(CONFIG_SMCDSD_PANEL)
 	int lcdtype = 0;
 #endif
@@ -91,7 +102,14 @@ int sec_input_get_lcd_id(struct device *dev)
 	}
 #endif
 
-	lcd_id_param = sec_input_lcd_parse_panel_id();
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
+	input_info(true, dev, "%s: %d\n", __func__, pdata->support_dual_foldable);
+	if (pdata->support_dual_foldable == SUB_TOUCH)
+		lcd_id_param = sec_input_lcd_parse_panel_id(lcd_id1);
+	else
+#endif
+		lcd_id_param = sec_input_lcd_parse_panel_id(lcd_id);
+
 	if (lcdtype <= 0 && lcd_id_param != 0) {
 		lcdtype = lcd_id_param;
 		if (lcdtype == 0xFFFFFF) {
@@ -824,7 +842,89 @@ static void sec_input_set_prop(struct device *dev, struct input_dev *input_dev, 
 	struct sec_ts_plat_data *pdata = dev->platform_data;
 	static char sec_input_phys[64] = { 0 };
 
-	snprintf(sec_input_phys, sizeof(sec_input_phys), "%s/input1", input_dev->name);
+	snprintf(sec_input_phys, sizeof(sec_input_phys), "%s", input_dev->name);
+	input_dev->phys = sec_input_phys;
+	input_dev->id.bustype = BUS_I2C;
+	input_dev->dev.parent = dev;
+
+	set_bit(EV_SYN, input_dev->evbit);
+	set_bit(EV_KEY, input_dev->evbit);
+	set_bit(EV_ABS, input_dev->evbit);
+	set_bit(EV_SW, input_dev->evbit);
+	set_bit(BTN_TOUCH, input_dev->keybit);
+	set_bit(BTN_TOOL_FINGER, input_dev->keybit);
+	set_bit(BTN_PALM, input_dev->keybit);
+	set_bit(BTN_LARGE_PALM, input_dev->keybit);
+	set_bit(KEY_BLACK_UI_GESTURE, input_dev->keybit);
+	set_bit(KEY_INT_CANCEL, input_dev->keybit);
+
+	set_bit(propbit, input_dev->propbit);
+	set_bit(KEY_WAKEUP, input_dev->keybit);
+	set_bit(KEY_WATCH, input_dev->keybit);
+
+	input_set_abs_params(input_dev, ABS_MT_POSITION_X, 0, pdata->max_x, 0, 0);
+	input_set_abs_params(input_dev, ABS_MT_POSITION_Y, 0, pdata->max_y, 0, 0);
+	input_set_abs_params(input_dev, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
+	input_set_abs_params(input_dev, ABS_MT_TOUCH_MINOR, 0, 255, 0, 0);
+	if (pdata->support_mt_pressure)
+		input_set_abs_params(input_dev, ABS_MT_PRESSURE, 0, 255, 0, 0);
+
+	if (propbit == INPUT_PROP_POINTER)
+		input_mt_init_slots(input_dev, SEC_TS_SUPPORT_TOUCH_COUNT, INPUT_MT_POINTER);
+	else
+		input_mt_init_slots(input_dev, SEC_TS_SUPPORT_TOUCH_COUNT, INPUT_MT_DIRECT);
+
+	input_set_drvdata(input_dev, data);
+}
+
+#if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
+static void sec_input_set_prop2(struct device *dev, struct input_dev *input_dev, u8 propbit, void *data)
+{
+	struct sec_ts_plat_data *pdata = dev->platform_data;
+	static char sec_input_phys[64] = { 0 };
+
+	snprintf(sec_input_phys, sizeof(sec_input_phys), "%s", input_dev->name);
+	input_dev->phys = sec_input_phys;
+	input_dev->id.bustype = BUS_I2C;
+	input_dev->dev.parent = dev;
+
+	set_bit(EV_SYN, input_dev->evbit);
+	set_bit(EV_KEY, input_dev->evbit);
+	set_bit(EV_ABS, input_dev->evbit);
+	set_bit(EV_SW, input_dev->evbit);
+	set_bit(BTN_TOUCH, input_dev->keybit);
+	set_bit(BTN_TOOL_FINGER, input_dev->keybit);
+	set_bit(BTN_PALM, input_dev->keybit);
+	set_bit(BTN_LARGE_PALM, input_dev->keybit);
+	set_bit(KEY_BLACK_UI_GESTURE, input_dev->keybit);
+	set_bit(KEY_INT_CANCEL, input_dev->keybit);
+
+	set_bit(propbit, input_dev->propbit);
+	set_bit(KEY_WAKEUP, input_dev->keybit);
+	set_bit(KEY_WATCH, input_dev->keybit);
+
+	input_set_abs_params(input_dev, ABS_MT_POSITION_X, 0, pdata->max_x, 0, 0);
+	input_set_abs_params(input_dev, ABS_MT_POSITION_Y, 0, pdata->max_y, 0, 0);
+	input_set_abs_params(input_dev, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
+	input_set_abs_params(input_dev, ABS_MT_TOUCH_MINOR, 0, 255, 0, 0);
+	if (pdata->support_mt_pressure)
+		input_set_abs_params(input_dev, ABS_MT_PRESSURE, 0, 255, 0, 0);
+
+	if (propbit == INPUT_PROP_POINTER)
+		input_mt_init_slots(input_dev, SEC_TS_SUPPORT_TOUCH_COUNT, INPUT_MT_POINTER);
+	else
+		input_mt_init_slots(input_dev, SEC_TS_SUPPORT_TOUCH_COUNT, INPUT_MT_DIRECT);
+
+	input_set_drvdata(input_dev, data);
+}
+#endif
+
+static void sec_input_set_prop_pad(struct device *dev, struct input_dev *input_dev, u8 propbit, void *data)
+{
+	struct sec_ts_plat_data *pdata = dev->platform_data;
+	static char sec_input_phys[64] = { 0 };
+
+	snprintf(sec_input_phys, sizeof(sec_input_phys), "%s", input_dev->name);
 	input_dev->phys = sec_input_phys;
 	input_dev->id.bustype = BUS_I2C;
 	input_dev->dev.parent = dev;
@@ -890,13 +990,17 @@ int sec_input_device_register(struct device *dev, void *data)
 	}
 
 #if IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
-	if (pdata->support_dual_foldable == SUB_TOUCH)
+	if (pdata->support_dual_foldable == SUB_TOUCH) {
 		pdata->input_dev->name = "sec_touchscreen2";
-	else 
-#endif
+		sec_input_set_prop2(dev, pdata->input_dev, INPUT_PROP_DIRECT, data);
+	} else {
 		pdata->input_dev->name = "sec_touchscreen";
-
+		sec_input_set_prop(dev, pdata->input_dev, INPUT_PROP_DIRECT, data);
+	}
+#else
+	pdata->input_dev->name = "sec_touchscreen";
 	sec_input_set_prop(dev, pdata->input_dev, INPUT_PROP_DIRECT, data);
+#endif
 	ret = input_register_device(pdata->input_dev);
 	if (ret) {
 		input_err(true, dev, "%s: Unable to register %s input device\n",
@@ -913,7 +1017,7 @@ int sec_input_device_register(struct device *dev, void *data)
 		}
 
 		pdata->input_dev_pad->name = "sec_touchpad";
-		sec_input_set_prop(dev, pdata->input_dev_pad, INPUT_PROP_POINTER, data);
+		sec_input_set_prop_pad(dev, pdata->input_dev_pad, INPUT_PROP_POINTER, data);
 		ret = input_register_device(pdata->input_dev_pad);
 		if (ret) {
 			input_err(true, dev, "%s: Unable to register %s input device\n",
@@ -1033,13 +1137,14 @@ int sec_input_parse_dt(struct device *dev)
 	u32 px_zone[3] = { 0 };
 	int lcd_type = 0, lcd_type_unload = 0;
 
+	if (of_property_read_u32(np, "sec,support_dual_foldable", &pdata->support_dual_foldable) < 0)
+		pdata->support_dual_foldable = 0;
+
 	lcd_type = sec_input_get_lcd_id(dev);
 #if !defined(DUAL_FOLDABLE_GKI)
 	if (lcd_type < 0) {
 		input_err(true, dev, "%s: lcd is not attached\n", __func__);
-#if !IS_ENABLED(CONFIG_TOUCHSCREEN_STM_SUB)
 		return -ENODEV;
-#endif
 	}
 #endif
 	input_info(true, dev, "%s: lcdtype 0x%08X\n", __func__, lcd_type);
@@ -1167,31 +1272,34 @@ int sec_input_parse_dt(struct device *dev)
 		}
 	}
 
-	pdata->not_support_io_ldo = of_property_read_bool(np, "not_support_io_ldo");
-	if (!pdata->not_support_io_ldo) {
-		pdata->dvdd = regulator_get(dev, "tsp_io_ldo");
-		if (IS_ERR_OR_NULL(pdata->dvdd)) {
+	pdata->not_support_vdd = of_property_read_bool(np, "not_support_vdd");
+	if (!pdata->not_support_vdd) {
+		pdata->not_support_io_ldo = of_property_read_bool(np, "not_support_io_ldo");
+		if (!pdata->not_support_io_ldo) {
+			pdata->dvdd = regulator_get(dev, "tsp_io_ldo");
+			if (IS_ERR_OR_NULL(pdata->dvdd)) {
+				input_err(true, dev, "%s: Failed to get %s regulator.\n",
+						__func__, "tsp_io_ldo");
+				ret = PTR_ERR(pdata->dvdd);
+#if !IS_ENABLED(CONFIG_QGKI)
+				if (gpio_is_valid(pdata->gpio_spi_cs))
+					gpio_free(pdata->gpio_spi_cs);
+#endif
+				return -EINVAL;
+			}
+		}
+ 
+		pdata->avdd = regulator_get(dev, "tsp_avdd_ldo");
+		if (IS_ERR_OR_NULL(pdata->avdd)) {
 			input_err(true, dev, "%s: Failed to get %s regulator.\n",
-					__func__, "tsp_io_ldo");
-			ret = PTR_ERR(pdata->dvdd);
+					__func__, "tsp_avdd_ldo");
+			ret = PTR_ERR(pdata->avdd);
 #if !IS_ENABLED(CONFIG_QGKI)
 			if (gpio_is_valid(pdata->gpio_spi_cs))
 				gpio_free(pdata->gpio_spi_cs);
 #endif
 			return -EINVAL;
 		}
-	}
-
-	pdata->avdd = regulator_get(dev, "tsp_avdd_ldo");
-	if (IS_ERR_OR_NULL(pdata->avdd)) {
-		input_err(true, dev, "%s: Failed to get %s regulator.\n",
-				__func__, "tsp_avdd_ldo");
-		ret = PTR_ERR(pdata->avdd);
-#if !IS_ENABLED(CONFIG_QGKI)
-		if (gpio_is_valid(pdata->gpio_spi_cs))
-			gpio_free(pdata->gpio_spi_cs);
-#endif
-		return -EINVAL;
 	}
 
 	pdata->regulator_boot_on = of_property_read_bool(np, "sec,regulator_boot_on");
@@ -1213,8 +1321,6 @@ int sec_input_parse_dt(struct device *dev)
 	pdata->sense_off_when_cover_closed = of_property_read_bool(np, "sense_off_when_cover_closed");
 	of_property_read_u32(np, "support_rawdata_map_num", &pdata->support_rawdata_map_num);
 
-	if (of_property_read_u32(np, "sec,support_dual_foldable", &pdata->support_dual_foldable) < 0)
-		pdata->support_dual_foldable = 0;
 	if (of_property_read_u32(np, "sec,support_sensor_hall", &pdata->support_sensor_hall) < 0)
 		pdata->support_sensor_hall = 0;
 	if (of_property_read_u32(np, "sec,dump_ic_ver", &pdata->dump_ic_ver) < 0)
@@ -1299,16 +1405,40 @@ void sec_tclm_parse_dt_dev(struct device *dev, struct sec_tclm_data *tdata)
 }
 EXPORT_SYMBOL(sec_tclm_parse_dt_dev);
 
+void stui_tsp_init(int (*stui_tsp_enter)(void), int (*stui_tsp_exit)(void), int (*stui_tsp_type)(void))
+{
+	pr_info("%s %s: called\n", SECLOG, __func__);
+
+	psecuretsp = kzalloc(sizeof(struct sec_ts_secure_data), GFP_KERNEL);
+
+	psecuretsp->stui_tsp_enter = stui_tsp_enter;
+	psecuretsp->stui_tsp_exit = stui_tsp_exit;
+	psecuretsp->stui_tsp_type = stui_tsp_type;
+}
+EXPORT_SYMBOL(stui_tsp_init);
+
+
 int stui_tsp_enter(void)
 {
 	struct sec_ts_plat_data *pdata = NULL;
-	if (ptsp == NULL)
+
+	if (psecuretsp != NULL) {
+		pr_info("%s %s: psecuretsp->stui_tsp_enter called!\n", SECLOG, __func__);
+		return psecuretsp->stui_tsp_enter();
+	}
+
+	if (ptsp == NULL) {
+		pr_info("%s: ptsp is null\n", __func__);
 		return -EINVAL;
+	}
 
 	pdata = ptsp->platform_data;
-	if (pdata == NULL)
+	if (pdata == NULL) {
+		pr_info("%s: pdata is null\n", __func__);
 		return  -EINVAL;
+	}
 
+	pr_info("%s %s: pdata->stui_tsp_enter called!\n", SECLOG, __func__);
 	return pdata->stui_tsp_enter();
 }
 EXPORT_SYMBOL(stui_tsp_enter);
@@ -1316,6 +1446,12 @@ EXPORT_SYMBOL(stui_tsp_enter);
 int stui_tsp_exit(void)
 {
 	struct sec_ts_plat_data *pdata = NULL;
+
+	if (psecuretsp != NULL) {
+		pr_info("%s %s: psecuretsp->stui_tsp_exit called!\n", SECLOG, __func__);
+		return psecuretsp->stui_tsp_exit();
+	}
+
 	if (ptsp == NULL)
 		return -EINVAL;
 
@@ -1323,6 +1459,7 @@ int stui_tsp_exit(void)
 	if (pdata == NULL)
 		return  -EINVAL;
 
+	pr_info("%s %s: pdata->stui_tsp_exit called!\n", SECLOG, __func__);
 	return pdata->stui_tsp_exit();
 }
 EXPORT_SYMBOL(stui_tsp_exit);
@@ -1330,6 +1467,12 @@ EXPORT_SYMBOL(stui_tsp_exit);
 int stui_tsp_type(void)
 {
 	struct sec_ts_plat_data *pdata = NULL;
+
+	if (psecuretsp != NULL) {
+		pr_info("%s %s: psecuretsp->stui_tsp_type called!\n", SECLOG, __func__);
+		return psecuretsp->stui_tsp_type();
+	}
+
 	if (ptsp == NULL)
 		return -EINVAL;
 
@@ -1337,6 +1480,7 @@ int stui_tsp_type(void)
 	if (pdata == NULL)
 		return  -EINVAL;
 
+	pr_info("%s %s: pdata->stui_tsp_type called!\n", SECLOG, __func__);
 	return pdata->stui_tsp_type();
 }
 EXPORT_SYMBOL(stui_tsp_type);
@@ -1454,4 +1598,3 @@ EXPORT_SYMBOL(sec_input_sysfs_remove);
 
 MODULE_DESCRIPTION("Samsung common functions");
 MODULE_LICENSE("GPL");
-

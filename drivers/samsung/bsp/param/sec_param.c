@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2011-2021 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2011-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #define pr_fmt(fmt)     KBUILD_MODNAME ":%s() " fmt, __func__
@@ -109,12 +109,12 @@ static void __param_remove_prolog(struct builder *bd)
 	sec_param = NULL;
 }
 
-static struct dev_builder __param_dev_builder[] = {
+static const struct dev_builder __param_dev_builder[] = {
 	DEVICE_BUILDER(__param_probe_epilog, __param_remove_prolog),
 };
 
 static int __param_probe(struct platform_device *pdev,
-		struct dev_builder *builder, ssize_t n)
+		const struct dev_builder *builder, ssize_t n)
 {
 	struct device *dev = &pdev->dev;
 	struct sec_param_drvdata *drvdata;
@@ -129,7 +129,7 @@ static int __param_probe(struct platform_device *pdev,
 }
 
 static int __param_remove(struct platform_device *pdev,
-		struct dev_builder *builder, ssize_t n)
+		const struct dev_builder *builder, ssize_t n)
 {
 	struct sec_param_drvdata *drvdata = platform_get_drvdata(pdev);
 

@@ -24,9 +24,70 @@
 #define DEBUG_ABC
 #define WARNING_REPORT
 
+struct list_head abc_pre_event_list;
+int abc_pre_event_cnt;
+bool abc_save_pre_event;
+
 struct device *sec_abc;
 int abc_enable_mode;
 int abc_init;
+int REGISTERED_ABC_EVENT_TOTAL;
+
+/* "module_name", "error_name", on, singular_spec */
+struct registered_abc_event_struct abc_event_list[] = {
+	{"audio", "spk_amp", true, true},
+	{"audio", "spk_amp_short", true, true},
+	{"battery", "aicl", true, true},
+	{"battery", "dc_i2c_fail", true, true},
+	{"battery", "over_voltage", true, true},
+	{"battery", "pd_input_ocp", true, true},
+	{"battery", "safety_timer", true, true},
+	{"battery", "vsys_ovp", true, true},
+	{"bootc", "boot_time_fail", true, true},
+	{"camera", "icp_error", true, true},
+	{"camera", "camera_error", true, true},
+	{"camera", "ipp_overflow", true, true},
+	{"camera", "i2c_fail", true, false},
+	{"camera", "mipi_overflow", true, false},
+	{"cond", "CAM_CONNECT", true, true},
+	{"cond", "LOWER_C2C_DETECT", true, true},
+	{"cond", "MAIN_BAT_DETECT", true, true},
+	{"cond", "MAIN_DIGITIZER_DETECT", true, true},
+	{"cond", "SUB_BAT_DETECT", true, true},
+	{"cond", "SUB_CONNECT", true, true},
+	{"cond", "SUB_LOWER_DETECT", true, true},
+	{"cond", "SUB_UB_DETECT", true, true},
+	{"cond", "TOF_CONNECT", true, true},
+	{"cond", "UPPER_C2C_DETECT", true, true},
+	{"decon", "fence_timeout", true, true},
+	{"display", "act_section_panel_main_dsi_error", true, true},
+	{"display", "act_section_panel_sub_dsi_error", true, true},
+	{"gpu", "gpu_fault", true, false},
+	{"gpu_qc", "gpu_fault", true, false},
+	{"gpu_qc", "gpu_page_fault", true, false},
+	{"muic", "afc_hv_fail", true, true},
+	{"muic", "cable_short", true, true},
+	{"muic", "qc_hv_fail", true, true},
+	{"npu", "npu_fw_warning", true, true},
+	{"pdic", "i2c_fail", true, true},
+	{"pdic", "water_det", true, true},
+	{"pmic", "s2dos05_bulk_read", true, true},
+	{"pmic", "s2dos05_bulk_write", true, true},
+	{"pmic", "s2dos05_read_reg", true, true},
+	{"pmic", "s2dos05_read_word", true, true},
+	{"pmic", "s2dos05_write_reg", true, true},
+	{"storage", "sd_removed_err", true, true},
+	{"storage", "ufs_hwreset_err", true, true},
+	{"storage", "ufs_medium_err", true, true},
+	{"ub_main", "ub_disconnected", true, true},
+	{"ub_sub", "ub_disconnected", true, true},
+	{"vib", "fw_load_fail", true, true},
+#if IS_ENABLED(CONFIG_SEC_KUNIT)
+	{"kunit", "test_warn", true, true},
+	{"kunit", "test_info", true, true},
+	{"kunit", "test_error", true, true},
+#endif
+};
 
 struct abc_enable_cmd_struct enable_cmd_list[] = {
 	{ERROR_REPORT_MODE_ENABLE, ERROR_REPORT_MODE_BIT, "ERROR_REPORT=1"},
@@ -58,20 +119,14 @@ static const struct dev_pm_ops sec_abc_pm = {
 	.resume = sec_abc_resume,
 };
 
-__visible_for_testing
-bool sec_abc_is_enabled(void)
-{
-	return (abc_enable_mode & (ERROR_REPORT_MODE_BIT | ALL_REPORT_MODE_BIT)) ? true : false;
-}
-
 bool sec_abc_is_valid_abc_string(char *str)
 {
-	char *event_str[ABC_UEVENT_MAX];
+	char *event_str[ABC_UEVENT_MAX] = {0,};
 	char temp[ABC_BUFFER_MAX];
 	char *c, *p;
 	int i, idx = 0;
 
-	ABC_PRINT("%s : check validation : %s", __func__, str);
+	ABC_PRINT("check validation : %s", str);
 
 	strlcpy(temp, str, ABC_BUFFER_MAX);
 	p = temp;
@@ -79,31 +134,56 @@ bool sec_abc_is_valid_abc_string(char *str)
 	while ((c = strsep(&p, "@")) != NULL) {
 
 		if (idx >= ABC_UEVENT_MAX)
-			return false;
+			goto invalid;
 
 		event_str[idx] = c;
 		idx++;
 		if (!*c)
-			return false;
+			goto invalid;
 	}
 
 	if (idx < 2)
-		return false;
+		goto invalid;
 
-	if (strncmp(event_str[0], "MODULE=", 7) ||
-	   (strncmp(event_str[1], "WARN=", 5) && strncmp(event_str[1], "INFO=", 5)))
-		return false;
+	if (strncmp(event_str[0], "MODULE=", 7))
+		goto invalid;
+
+	if (strncmp(event_str[1], "WARN=", 5) &&
+	    strncmp(event_str[1], "INFO=", 5) &&
+		strncmp(event_str[1], "ERROR=", 6))
+		goto invalid;
+
+	for (i = 2; i < idx; i++) {
+		if (strncmp(event_str[i], "EXT_LOG=", 8) &&
+			strncmp(event_str[i], "HOST=", 5))
+			goto invalid;
+	}
 
 	for (i = 0; i < idx; i++) {
 
 		c = strstr(event_str[i], "=");
 
 		if (!c || !*(c + 1))
-			return false;
+			goto invalid;
 	}
 
-	ABC_PRINT("%s : %s is valid", __func__, str);
+	ABC_PRINT("%s is valid", str);
 	return true;
+invalid:
+	ABC_PRINT("%s is invalid", str);
+	return false;
+}
+
+int sec_abc_get_idx_of_registered_event(struct abc_key_data *key_data)
+{
+	int i;
+
+	for (i = 0; i < REGISTERED_ABC_EVENT_TOTAL; i++)
+		if (!strncmp(key_data->event_module, abc_event_list[i].module_name, ABC_EVENT_STR_MAX) &&
+			!strncmp(key_data->event_name, abc_event_list[i].error_name, ABC_EVENT_STR_MAX))
+			return i;
+
+	return -1;
 }
 
 void sec_abc_send_uevent(struct abc_key_data *key_data, unsigned int cur_time, char *uevent_type)
@@ -111,10 +191,19 @@ void sec_abc_send_uevent(struct abc_key_data *key_data, unsigned int cur_time, c
 	char *uevent_str[ABC_UEVENT_MAX] = {0,};
 	char uevent_module_str[ABC_EVENT_STR_MAX + 7];
 	char uevent_event_str[ABC_EVENT_STR_MAX + ABC_TYPE_STR_MAX];
+	char uevent_host_str[ABC_EVENT_STR_MAX];
+	char uevent_ext_log_str[ABC_EVENT_STR_MAX];
 	char timestamp[TIME_STAMP_STR_MAX];
+	int idx;
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
 	struct abc_info *pinfo = dev_get_drvdata(sec_abc);
 #endif
+
+	if (!sec_abc_get_enabled()) {
+		ABC_PRINT("ABC isn't enabled. Save pre_event");
+		sec_abc_save_pre_events(key_data, cur_time, uevent_type);
+		return;
+	}
 
 	snprintf(uevent_module_str, ABC_EVENT_STR_MAX, "MODULE=%s", key_data->event_module);
 	snprintf(uevent_event_str, ABC_EVENT_STR_MAX, "%s=%s", uevent_type, key_data->event_name);
@@ -123,8 +212,18 @@ void sec_abc_send_uevent(struct abc_key_data *key_data, unsigned int cur_time, c
 	uevent_str[0] = uevent_module_str;
 	uevent_str[1] = uevent_event_str;
 	uevent_str[2] = timestamp;
-	uevent_str[3] = NULL;
+	if (key_data->host_name[0]) {
+		snprintf(uevent_host_str, ABC_EVENT_STR_MAX, "HOST=%s", key_data->host_name);
+		uevent_str[3] = uevent_host_str;
+	}
 
+	if (key_data->ext_log[0]) {
+		snprintf(uevent_ext_log_str, ABC_EVENT_STR_MAX, "EXT_LOG=%s", key_data->ext_log);
+		uevent_str[4] = uevent_ext_log_str;
+	}
+
+	for (idx = 0; uevent_str[idx]; idx++)
+		ABC_PRINT("%s", uevent_str[idx]);
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
 	abc_common_test_get_work_str(uevent_str);
 	complete(&pinfo->test_uevent_done);
@@ -133,31 +232,30 @@ void sec_abc_send_uevent(struct abc_key_data *key_data, unsigned int cur_time, c
 }
 
 __visible_for_testing
-struct abc_pre_event *sec_abc_get_pre_event_node(char *str)
+struct abc_pre_event *sec_abc_get_pre_event_node(struct abc_key_data *key_data)
 {
-	struct abc_info *pinfo = dev_get_drvdata(sec_abc);
 	struct abc_pre_event *pre_event;
 
-	list_for_each_entry(pre_event, &pinfo->pre_event_list, node) {
-		if (!strcmp(pre_event->abc_str, str)) {
-			ABC_PRINT("%s : return matched node.\n", __func__);
+	list_for_each_entry(pre_event, &abc_pre_event_list, node) {
+		if (!strcmp(pre_event->key_data.event_module, key_data->event_module) &&
+			!strcmp(pre_event->key_data.event_name, key_data->event_name)) {
+			ABC_PRINT("return matched node");
 			return pre_event;
 		}
 	}
 
 	pre_event = NULL;
 
-	if (pinfo->pre_event_cnt < ABC_PREOCCURRED_EVENT_MAX) {
+	if (abc_pre_event_cnt < ABC_PREOCCURRED_EVENT_MAX) {
 
 		pre_event = kzalloc(sizeof(*pre_event), GFP_KERNEL);
 
 		if (pre_event) {
-			list_add_tail(&pre_event->node, &pinfo->pre_event_list);
-			strlcpy(pre_event->abc_str, str, ABC_BUFFER_MAX);
-			pinfo->pre_event_cnt++;
-			ABC_PRINT("%s : return new node.\n", __func__);
+			list_add_tail(&pre_event->node, &abc_pre_event_list);
+			abc_pre_event_cnt++;
+			ABC_PRINT("return new node");
 		} else
-			ABC_PRINT("%s : failed to get node.\n", __func__);
+			ABC_PRINT("failed to get node");
 	}
 
 	return pre_event;
@@ -170,25 +268,29 @@ int sec_abc_clear_pre_events(void)
 	struct abc_pre_event *pre_event;
 	int cnt = 0;
 
-	ABC_PRINT("%s : start", __func__);
+	ABC_PRINT("start");
+	mutex_lock(&pinfo->pre_event_mutex);
 
-	while (!list_empty(&pinfo->pre_event_list)) {
-		pre_event = list_first_entry(&pinfo->pre_event_list,
+	while (!list_empty(&abc_pre_event_list)) {
+		pre_event = list_first_entry(&abc_pre_event_list,
 										struct abc_pre_event,
 										node);
 		list_del(&pre_event->node);
 		kfree(pre_event);
 		cnt++;
 	}
-	pinfo->pre_event_cnt = 0;
 
-	/* Once Pre_events were cleared, don't save pre_event anymore till pre_event is enabled again. */
-	abc_enable_mode &= (~PRE_EVENT_ENABLE_BIT);
+	abc_pre_event_cnt = 0;
+
+	/* Once Pre_events were cleared, don't save pre_event anymore. */
+	abc_save_pre_event = false;
+	abc_enable_mode &= ~(PRE_EVENT_ENABLE_BIT);
 
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
 	complete(&pinfo->test_work_done);
 #endif
-	ABC_PRINT("%s : end", __func__);
+	mutex_unlock(&pinfo->pre_event_mutex);
+	ABC_PRINT("end");
 	return cnt;
 }
 
@@ -197,63 +299,70 @@ int sec_abc_process_pre_events(void)
 {
 	struct abc_info *pinfo = dev_get_drvdata(sec_abc);
 	struct abc_pre_event *pre_event;
-	struct abc_key_data key_data;
 	int i, cnt = 0;
 
-	ABC_PRINT("%s : start", __func__);
+	ABC_PRINT("start");
 
-	list_for_each_entry(pre_event, &pinfo->pre_event_list, node) {
-		sec_abc_make_key_data(&key_data, pre_event->abc_str);
+	mutex_lock(&pinfo->pre_event_mutex);
+	list_for_each_entry(pre_event, &abc_pre_event_list, node) {
 
 		if (abc_enable_mode & ALL_REPORT_MODE_BIT) {
-			ABC_PRINT("%s : All report mode. Send uevent.\n", __func__);
-			sec_abc_send_uevent(&key_data, pre_event->cur_time, key_data.event_type);
+			ABC_PRINT("All report mode. Send uevent");
+			cnt += pre_event->all_cnt;
+
+			for (i = 0; i < pre_event->all_cnt; i++)
+				sec_abc_send_uevent(&pre_event->key_data,
+									pre_event->cur_time,
+									pre_event->key_data.event_type);
+
 		}
 
-		if (sec_abc_reached_spec_pre(&key_data, pre_event)) {
-			ABC_PRINT("%s : Pre_event spec out! Send uevent.\n", __func__);
-			sec_abc_send_uevent(&key_data, pre_event->cur_time, "ERROR");
-		} else {
-			ABC_PRINT("%s : Pre_event spec in! Enqueue %d pre_events.\n", __func__, pre_event->cnt);
-			for (i = 0; i < pre_event->cnt; i++)
-				sec_abc_enqueue_event_data(&key_data, pre_event->cur_time);
-		}
-		cnt++;
+		cnt += pre_event->error_cnt;
+		for (i = 0; i < pre_event->error_cnt; i++)
+			if (abc_event_list[pre_event->key_data.idx].enabled)
+				sec_abc_send_uevent(&pre_event->key_data, pre_event->cur_time, "ERROR");
 	}
+	mutex_unlock(&pinfo->pre_event_mutex);
+	ABC_PRINT("end");
 
-	ABC_PRINT("%s : end", __func__);
 	return cnt;
 }
 
-__visible_for_testing
-int sec_abc_save_pre_events(char *str, unsigned int cur_time)
+int sec_abc_save_pre_events(struct abc_key_data *key_data, unsigned int cur_time, char *uevent_type)
 {
-#if IS_ENABLED(CONFIG_SEC_KUNIT)
 	struct abc_info *pinfo = dev_get_drvdata(sec_abc);
-#endif
 	struct abc_pre_event *pre_event;
 	int ret = 0;
 
-	ABC_PRINT("%s : start %s\n", __func__, str);
+	mutex_lock(&pinfo->pre_event_mutex);
 
-	pre_event = sec_abc_get_pre_event_node(str);
+	ABC_PRINT("start Module(%s) Event(%s) Type(%s)",
+			  key_data->event_module,
+			  key_data->event_name,
+			  uevent_type);
+
+	pre_event = sec_abc_get_pre_event_node(key_data);
 
 	if (!pre_event) {
-		ABC_PRINT("%s : Failed to add Pre_event : %s.\n", __func__, str);
+		ABC_PRINT("Failed to add Pre_event");
 		ret = -EINVAL;
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("Failed to add Pre_event.\n");
+		abc_common_test_get_log_str("Failed to add Pre_event");
 #endif
-		goto save_pre_event_out;
+		goto out;
 	}
 
+	pre_event->key_data = *key_data;
 	pre_event->cur_time = cur_time;
-	pre_event->cnt++;
 
-save_pre_event_out:
-#if IS_ENABLED(CONFIG_SEC_KUNIT)
-	complete(&pinfo->test_work_done);
-#endif
+	if (!strncmp(uevent_type, "ERROR", 5))
+		pre_event->error_cnt++;
+	else
+		pre_event->all_cnt++;
+
+out:
+	mutex_unlock(&pinfo->pre_event_mutex);
+	ABC_PRINT("end");
 	return ret;
 }
 
@@ -263,30 +372,30 @@ void sec_abc_process_changed_enable_mode(void)
 	struct abc_info *pinfo = dev_get_drvdata(sec_abc);
 	struct spec_data_type1 *spec_type1;
 
-	if (sec_abc_is_enabled()) {
+	if (sec_abc_get_enabled()) {
 		if (abc_enable_mode & PRE_EVENT_ENABLE_BIT) {
-			ABC_PRINT("%s : %d Pre_events processed.\n", __func__, sec_abc_process_pre_events());
+			ABC_PRINT("%d Pre_events processed", sec_abc_process_pre_events());
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-			abc_common_test_get_log_str("Pre_events processed.\n");
+			abc_common_test_get_log_str("Pre_events processed");
 #endif
 		} else {
-			ABC_PRINT("%s : ABC enabled. Pre_event disabled.\n", __func__);
+			ABC_PRINT("ABC enabled. Pre_event disabled");
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-			abc_common_test_get_log_str("ABC enabled. Pre_event disabled.\n");
+			abc_common_test_get_log_str("ABC enabled. Pre_event disabled");
 #endif
 		}
-		pinfo->abc_enabled_flag = true;
 		complete(&pinfo->enable_done);
 	} else {
+		ABC_PRINT("ABC is disabled. Clear events");
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("ABC is disabled. Clear events.\n");
+		abc_common_test_get_log_str("ABC is disabled. Clear events");
 #endif
 		list_for_each_entry(spec_type1, &pinfo->pdata->abc_spec_list, node) {
 			sec_abc_reset_buffer_type1(spec_type1);
 		}
 	}
 
-	ABC_PRINT("%s : %d Pre_events cleared.\n", __func__, sec_abc_clear_pre_events());
+	ABC_PRINT("%d Pre_events cleared", sec_abc_clear_pre_events());
 }
 
 /* Change ABC driver's enable mode.
@@ -305,15 +414,15 @@ ssize_t enabled_store(struct device *dev,
 	char *c, *p, *enable_cmd[ABC_CMD_MAX];
 	char temp[ABC_CMD_STR_MAX * 3];
 	int items, i, j, idx = 0;
-	int chk = 0;
+	bool chk = false;
 	int origin_enable_mode = abc_enable_mode;
 
 	if (!strncmp(buf, "1", 1)) {
 		/* Interface with ACT */
-		ABC_PRINT("Error report mode enabled.\n");
+		ABC_PRINT("Error report mode enabled");
 		abc_enable_mode |= ERROR_REPORT_MODE_BIT;
 	} else if (!strncmp(buf, "0", 1)) {
-		ABC_PRINT("Error report mode disabled.\n");
+		ABC_PRINT("Error report mode disabled");
 		abc_enable_mode &= (~ERROR_REPORT_MODE_BIT);
 	} else {
 
@@ -327,23 +436,23 @@ ssize_t enabled_store(struct device *dev,
 		}
 
 		for (i = 0; i < idx; i++) {
-			chk = 0;
+			chk = false;
 			for (j = 0; j < items; j++) {
 				if (!strncmp(enable_cmd[i],
 					enable_cmd_list[j].abc_cmd_str,
 					strlen(enable_cmd_list[j].abc_cmd_str))) {
-					ABC_PRINT("%s : %s.\n", __func__, enable_cmd_list[j].abc_cmd_str);
+					ABC_PRINT("%s", enable_cmd_list[j].abc_cmd_str);
 					if (strstr(enable_cmd_list[j].abc_cmd_str, "=1"))
 						abc_enable_mode |= enable_cmd_list[j].enable_value;
 					else
 						abc_enable_mode &= ~(enable_cmd_list[j].enable_value);
-					chk = 1;
+					chk = true;
 				}
 			}
 			if (!chk) {
-				ABC_PRINT("%s : Invalid string. Check the Input : %s.\n", __func__, buf);
+				ABC_PRINT("%s : Invalid string. Check the Input : %s", __func__, buf);
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-				abc_common_test_get_log_str("Invalid string. Check the Input.\n");
+				abc_common_test_get_log_str("Invalid string. Check the Input");
 #endif
 				abc_enable_mode = origin_enable_mode;
 				return count;
@@ -360,7 +469,7 @@ ssize_t enabled_show(struct device *dev,
 					 struct device_attribute *attr,
 					 char *buf)
 {
-	if (sec_abc_is_enabled())
+	if (sec_abc_get_enabled())
 		return sprintf(buf, "1\n");
 	else
 		return sprintf(buf, "0\n");
@@ -402,38 +511,52 @@ ssize_t spec_show(struct device *dev,
 }
 static DEVICE_ATTR_RW(spec);
 
+__visible_for_testing
+ssize_t features_store(struct device *dev,
+				   struct device_attribute *attr,
+				   const char *buf,
+				   size_t count)
+{
+	return count;
+}
+
+__visible_for_testing
+ssize_t features_show(struct device *dev,
+				  struct device_attribute *attr,
+				  char *buf)
+{
+	int count = 0;
+
+	count += scnprintf(buf, PAGE_SIZE, "spec_control\nissue_tracker\n");
+
+	return count;
+}
+static DEVICE_ATTR_RW(features);
+
+static struct attribute *sec_abc_attr[] = {
+	&dev_attr_enabled.attr,
+	&dev_attr_spec.attr,
+	&dev_attr_features.attr,
+	NULL,
+};
+
+static struct attribute_group sec_abc_attr_group = {
+	.attrs = sec_abc_attr,
+};
+
 int sec_abc_get_enabled(void)
 {
-	return abc_enable_mode;
+	return (abc_enable_mode & (ERROR_REPORT_MODE_BIT | ALL_REPORT_MODE_BIT));
 }
 EXPORT_SYMBOL(sec_abc_get_enabled);
 
-static void sec_abc_work_func_save_pre_events(struct work_struct *work)
-{
-	struct abc_event_work *pre_event_work_data;
-	struct abc_info *pinfo = dev_get_drvdata(sec_abc);
-
-	ABC_PRINT("%s : start", __func__);
-	mutex_lock(&pinfo->pre_event_mutex);
-
-	pre_event_work_data = container_of(work, struct abc_event_work, work);
-	sec_abc_save_pre_events(pre_event_work_data->abc_str, pre_event_work_data->cur_time);
-
-	mutex_unlock(&pinfo->pre_event_mutex);
-	ABC_PRINT("%s : end", __func__);
-}
-
 static void sec_abc_work_func_clear_pre_events(struct work_struct *work)
 {
-	struct abc_info *pinfo = dev_get_drvdata(sec_abc);
-
-	ABC_PRINT("%s : start", __func__);
-	mutex_lock(&pinfo->pre_event_mutex);
+	ABC_PRINT("start");
 
 	sec_abc_clear_pre_events();
 
-	mutex_unlock(&pinfo->pre_event_mutex);
-	ABC_PRINT("%s : end", __func__);
+	ABC_PRINT("end");
 }
 
 static void sec_abc_work_func(struct work_struct *work)
@@ -441,42 +564,66 @@ static void sec_abc_work_func(struct work_struct *work)
 	struct abc_info *pinfo = dev_get_drvdata(sec_abc);
 	struct abc_event_work *event_work_data;
 	struct abc_key_data key_data;
+	int idx;
 
 	mutex_lock(&pinfo->work_mutex);
 
 	event_work_data = container_of(work, struct abc_event_work, work);
 
-	ABC_PRINT("%s : work start. str : %s\n", __func__, event_work_data->abc_str);
+	ABC_PRINT("work start. str : %s", event_work_data->abc_str);
+
+	if (!sec_abc_is_valid_abc_string(event_work_data->abc_str)) {
+		ABC_PRINT("Event string isn't valid. Check Input : %s", event_work_data->abc_str);
+		goto abc_work_end;
+	}
 
 	sec_abc_make_key_data(&key_data, event_work_data->abc_str);
+
+	idx = sec_abc_get_idx_of_registered_event(&key_data);
+
+	if (idx < 0) {
+		ABC_PRINT("%s : %s isn't registered", key_data.event_module, key_data.event_name);
+#if IS_ENABLED(CONFIG_SEC_KUNIT)
+		abc_common_test_get_log_str("Unregistered event");
+#endif
+		goto abc_work_end;
+	}
+
+	key_data.idx = idx;
 
 #if IS_ENABLED(CONFIG_SEC_ABC_MOTTO)
 	motto_send_device_info(key_data.event_module, key_data.event_name);
 #endif
 
-	if (abc_enable_mode & ALL_REPORT_MODE_BIT) {
-		ABC_PRINT("%s : All report mode enabled. Send uevent.\n", __func__);
+	if (abc_enable_mode & (ALL_REPORT_MODE_BIT | PRE_EVENT_ENABLE_BIT)) {
+		ABC_PRINT("All report mode may be enabled. Send uevent");
 		sec_abc_send_uevent(&key_data, event_work_data->cur_time, key_data.event_type);
 	}
 
-	if (!sec_abc_is_enabled_error(&key_data)) {
-		ABC_PRINT("%s : event_name : %s isn't enabled.\n", __func__, key_data.event_name);
+	if (!abc_event_list[idx].enabled || !strncmp(key_data.event_type, "INFO", 4)) {
+		ABC_PRINT("Don't send error report for %s", key_data.event_name);
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("Disabled event.\n");
+		abc_common_test_get_log_str("Don't send error report");
 #endif
 		goto abc_work_end;
 	}
 
-	sec_abc_enqueue_event_data(&key_data, event_work_data->cur_time);
-
-	if (sec_abc_reached_spec(&key_data, event_work_data->cur_time)) {
+	if (abc_event_list[idx].singular_spec) {
+		ABC_PRINT("Send uevent : %s", event_work_data->abc_str);
 		sec_abc_send_uevent(&key_data, event_work_data->cur_time, "ERROR");
-		ABC_PRINT("%s : Send uevent : %s.\n", __func__, event_work_data->abc_str);
-		sec_abc_reset_event_buffer(&key_data);
+	} else {
+
+		sec_abc_enqueue_event_data(&key_data, event_work_data->cur_time);
+
+		if (sec_abc_reached_spec(&key_data, event_work_data->cur_time)) {
+			ABC_PRINT("Send uevent : %s", event_work_data->abc_str);
+			sec_abc_send_uevent(&key_data, event_work_data->cur_time, "ERROR");
+			sec_abc_reset_event_buffer(&key_data);
+		}
 	}
 
 abc_work_end:
-	ABC_PRINT("%s : work done.\n", __func__);
+	ABC_PRINT("work done");
 	mutex_unlock(&pinfo->work_mutex);
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
 	complete(&pinfo->test_work_done);
@@ -504,7 +651,7 @@ void sec_abc_enqueue_work(struct abc_event_work work_data[], char *str)
 
 	for (idx = 0; idx < ABC_WORK_MAX; idx++) {
 		if (!work_pending(&work_data[idx].work)) {
-			ABC_PRINT("%s : Event %s use work[%d].\n", __func__, str, idx);
+			ABC_PRINT("Event %s use work[%d]", str, idx);
 			strlcpy(work_data[idx].abc_str, str, ABC_BUFFER_MAX);
 			queue_work(pinfo->workqueue, &work_data[idx].work);
 			work_data[idx].cur_time = (int)ktime;
@@ -512,7 +659,7 @@ void sec_abc_enqueue_work(struct abc_event_work work_data[], char *str)
 		}
 	}
 
-	ABC_PRINT("%s : Failed. All works are in queue.\n", __func__);
+	ABC_PRINT("Failed. All works are in queue");
 }
 
 void sec_abc_send_event(char *str)
@@ -520,39 +667,27 @@ void sec_abc_send_event(char *str)
 	struct abc_info *pinfo = dev_get_drvdata(sec_abc);
 
 	if (!abc_init) {
-		ABC_PRINT("%s : ABC driver is not initialized!(%s)\n", __func__, str);
+		ABC_PRINT("ABC driver is not initialized!(%s)", str);
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("ABC driver is not initialized!\n");
+		abc_common_test_get_log_str("ABC driver is not initialized!");
 #endif
 		return;
 	}
 
-	if (!sec_abc_is_valid_abc_string(str)) {
-		ABC_PRINT("%s : Event string isn't valid. Check Input : %s\n", __func__, str);
+	if (!sec_abc_get_enabled() && !abc_save_pre_event) {
+		ABC_PRINT("ABC is disabled and pre_event is disabled.(%s)", str);
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("Event string isn't valid. Check Input!\n");
+		abc_common_test_get_log_str("ABC is disabled and pre_event is disabled");
 #endif
 		return;
 	}
 
-	if (sec_abc_is_enabled()) {
-		ABC_PRINT("%s : ABC is enabled. Queue work.(%s)\n", __func__, str);
+	ABC_PRINT("ABC is working. Queue work.(%s)", str);
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("ABC is enabled. Queue work.\n");
+	abc_common_test_get_log_str("ABC is working. Queue work");
 #endif
-		sec_abc_enqueue_work(pinfo->event_work_data, str);
-	} else if (abc_enable_mode & PRE_EVENT_ENABLE_BIT) {
-		ABC_PRINT("%s : ABC is disabled. Queue pre_event_work.(%s)\n", __func__, str);
-#if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("ABC is disabled. Queue pre_event_work.\n");
-#endif
-		sec_abc_enqueue_work(pinfo->pre_event_work_data, str);
-	} else {
-		ABC_PRINT("%s : ABC is disabled and pre_event is disabled.(%s)\n", __func__, str);
-#if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("ABC is disabled and pre_event is disabled.\n");
-#endif
-	}
+	sec_abc_enqueue_work(pinfo->event_work_data, str);
+
 }
 EXPORT_SYMBOL(sec_abc_send_event);
 
@@ -566,14 +701,14 @@ int sec_abc_wait_enabled(void)
 	unsigned long timeout;
 
 	if (!abc_init) {
-		ABC_PRINT("%s : ABC driver is not initialized!\n", __func__);
+		ABC_PRINT("ABC driver is not initialized!");
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("ABC driver is not initialized!\n");
+		abc_common_test_get_log_str("ABC driver is not initialized!");
 #endif
 		return -1;
 	}
 
-	if (sec_abc_is_enabled())
+	if (sec_abc_get_enabled())
 		return 0;
 
 	pinfo = dev_get_drvdata(sec_abc);
@@ -584,9 +719,9 @@ int sec_abc_wait_enabled(void)
 						  msecs_to_jiffies(ABC_WAIT_ENABLE_TIMEOUT));
 
 	if (timeout == 0) {
-		ABC_PRINT("%s : timeout!\n", __func__);
+		ABC_PRINT("timeout!");
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("timeout!\n");
+		abc_common_test_get_log_str("timeout!");
 #endif
 		return -1;
 	}
@@ -602,7 +737,7 @@ static int sec_abc_probe(struct platform_device *pdev)
 	int ret = 0;
 	int idx = 0;
 
-	ABC_PRINT("%s\n", __func__);
+	ABC_PRINT("start");
 
 	abc_init = false;
 
@@ -611,7 +746,7 @@ static int sec_abc_probe(struct platform_device *pdev)
 					 sizeof(struct abc_platform_data), GFP_KERNEL);
 
 		if (!pdata) {
-			dev_err(&pdev->dev, "Failed to allocate platform data\n");
+			dev_err(&pdev->dev, "Failed to allocate platform data");
 			ret = -ENOMEM;
 			goto out;
 		}
@@ -620,17 +755,17 @@ static int sec_abc_probe(struct platform_device *pdev)
 		INIT_LIST_HEAD(&pdata->abc_spec_list);
 		ret = abc_parse_dt(&pdev->dev);
 		if (ret) {
-			dev_err(&pdev->dev, "Failed to parse dt data\n");
+			dev_err(&pdev->dev, "Failed to parse dt data");
 			goto err_parse_dt;
 		}
 
-		pr_info("%s: parse dt done\n", __func__);
+		ABC_PRINT("parse dt done");
 	} else {
 		pdata = pdev->dev.platform_data;
 	}
 
 	if (!pdata) {
-		dev_err(&pdev->dev, "There are no platform data\n");
+		dev_err(&pdev->dev, "There are no platform data");
 		ret = -EINVAL;
 		goto out;
 	}
@@ -648,25 +783,20 @@ static int sec_abc_probe(struct platform_device *pdev)
 	pinfo->dev = device_create(sec_class, NULL, 0, NULL, "sec_abc");
 #endif
 	if (IS_ERR(pinfo->dev)) {
-		pr_err("%s Failed to create device(sec_abc)!\n", __func__);
+		pr_err("%s Failed to create device(sec_abc)!", __func__);
 		ret = -ENODEV;
 		goto err_create_device;
 	}
+
 	sec_abc = pinfo->dev;
 
-	ret = device_create_file(pinfo->dev, &dev_attr_enabled);
+	ret = sysfs_create_group(&pinfo->dev->kobj, &sec_abc_attr_group);
 	if (ret) {
-		pr_err("%s: Failed to create device enabled file\n", __func__);
-		goto err_create_abc_enable_mode_sysfs;
+		pr_err("%s: Failed to create device attribute group", __func__);
+		goto err_create_abc_attr_group;
 	}
 
-	ret = device_create_file(pinfo->dev, &dev_attr_spec);
-	if (ret) {
-		pr_err("%s: Failed to create device error_spec file\n", __func__);
-		goto err_create_abc_error_spec_sysfs;
-	}
-
-	INIT_LIST_HEAD(&pinfo->pre_event_list);
+	INIT_LIST_HEAD(&abc_pre_event_list);
 	pinfo->workqueue = create_singlethread_workqueue("sec_abc_wq");
 
 	INIT_DELAYED_WORK(&pinfo->clear_pre_events, sec_abc_work_func_clear_pre_events);
@@ -677,10 +807,8 @@ static int sec_abc_probe(struct platform_device *pdev)
 					   msecs_to_jiffies(ABC_CLEAR_EVENT_TIMEOUT));
 
 	/* Work for abc_events & pre_events (events occurred before enabled) */
-	for (idx = 0; idx < ABC_WORK_MAX; idx++) {
+	for (idx = 0; idx < ABC_WORK_MAX; idx++)
 		INIT_WORK(&pinfo->event_work_data[idx].work, sec_abc_work_func);
-		INIT_WORK(&pinfo->pre_event_work_data[idx].work, sec_abc_work_func_save_pre_events);
-	}
 
 	if (!pinfo->workqueue)
 		goto err_create_abc_wq;
@@ -701,13 +829,13 @@ static int sec_abc_probe(struct platform_device *pdev)
 #endif
 	abc_init = true;
 	abc_enable_mode |= PRE_EVENT_ENABLE_BIT;
-	ABC_PRINT("%s success\n", __func__);
+	abc_save_pre_event = true;
+	REGISTERED_ABC_EVENT_TOTAL = ARRAY_SIZE(abc_event_list);
+	ABC_PRINT("success");
 	return ret;
 err_create_abc_wq:
-	device_remove_file(pinfo->dev, &dev_attr_spec);
-err_create_abc_error_spec_sysfs:
-	device_remove_file(pinfo->dev, &dev_attr_enabled);
-err_create_abc_enable_mode_sysfs:
+	sysfs_remove_group(&pinfo->dev->kobj, &sec_abc_attr_group);
+err_create_abc_attr_group:
 #if IS_ENABLED(CONFIG_DRV_SAMSUNG)
 	sec_device_destroy(sec_abc->devt);
 #else
@@ -730,10 +858,10 @@ void sec_abc_free_allocated_memory(void)
 	struct spec_data_type1 *spec_buf;
 	struct abc_info *pinfo = dev_get_drvdata(sec_abc);
 
-	while (!list_empty(&pinfo->pre_event_list)) {
+	while (!list_empty(&abc_pre_event_list)) {
 
 		pre_event = list_first_entry(
-							 &pinfo->pre_event_list,
+							 &abc_pre_event_list,
 							 struct abc_pre_event,
 							 node);
 
@@ -768,7 +896,7 @@ kunit_notifier_chain_init(abc_spec_type1_test_module);
 
 static int __init sec_abc_init(void)
 {
-	ABC_PRINT("%s\n", __func__);
+	ABC_PRINT("start");
 
 #ifdef CONFIG_SEC_KUNIT
 	kunit_notifier_chain_register(abc_common_test_module);
@@ -780,7 +908,7 @@ static int __init sec_abc_init(void)
 
 static void __exit sec_abc_exit(void)
 {
-	ABC_PRINT("%s\n", __func__);
+	ABC_PRINT("exit");
 	sec_abc_free_allocated_memory();
 
 #ifdef CONFIG_SEC_KUNIT

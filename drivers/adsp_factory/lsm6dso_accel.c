@@ -587,6 +587,11 @@ void slpi_motor_work_func(struct work_struct *work)
 
 	adsp_unicast(&msg_buf, sizeof(int32_t), MSG_ACCEL,
 		0, MSG_TYPE_SET_ACCEL_MOTOR);
+#ifdef CONFIG_SUPPORT_DUAL_6AXIS
+	usleep_range(500, 550);
+	adsp_unicast(&msg_buf, sizeof(int32_t), MSG_ACCEL_SUB,
+		0, MSG_TYPE_SET_ACCEL_MOTOR);
+#endif
 }
 #endif
 

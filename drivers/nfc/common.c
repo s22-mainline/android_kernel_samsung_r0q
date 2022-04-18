@@ -21,6 +21,7 @@
 #include <linux/of_gpio.h>
 #include <linux/delay.h>
 #include <linux/version.h>
+#include <linux/module.h>
 #if IS_ENABLED(CONFIG_SAMSUNG_NFC)
 #include <linux/regulator/consumer.h>
 #endif

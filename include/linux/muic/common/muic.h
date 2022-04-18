@@ -1,10 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * include/linux/muic/common/muic.h
  *
  * header file supporting MUIC common information
  *
- * Copyright (C) 2010 Samsung Electronics
- * Seoyoung Jeong <seo0.jeong@samsung.com>
+ * Copyright (C) 2022 Samsung Electronics
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,8 +17,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
+ * along with this program; if not, see <http://www.gnu.org/licenses/>.
  *
  */
 
@@ -31,6 +30,8 @@
 #include <linux/muic/common/muic_param.h>
 
 #define MUIC_CORE "MUIC_CORE"
+#define SIOP (1 << 0)
+#define FLED (1 << 1)
 /* Status of IF PMIC chip (suspend and resume) */
 enum {
 	MUIC_SUSPEND		= 0,
@@ -359,6 +360,9 @@ struct muic_platform_data {
 	/* muic set hiccup mode function */
 	int (*muic_set_hiccup_mode_cb)(int on_off);
 
+	/* muic request afc cause */
+	int afc_request_cause;
+
 	void *drv_data;
 };
 
@@ -591,6 +595,8 @@ extern int muic_hv_charger_init(void);
 extern int muic_afc_get_voltage(void);
 #if !defined(CONFIG_DISCRETE_CHARGER)
 extern int muic_afc_set_voltage(int voltage);
+extern int muic_afc_request_voltage(int cause, int voltage);
+extern int muic_afc_request_cause_clear(void);
 #endif
 extern int muic_hv_charger_disable(bool en);
 
@@ -602,6 +608,8 @@ static inline int muic_hv_charger_init(void) {return 0; }
 static inline int muic_afc_get_voltage(void) {return 0; }
 #if !defined(CONFIG_DISCRETE_CHARGER)
 static inline int muic_afc_set_voltage(int voltage) {return 0; }
+static inline int muic_afc_request_voltage(int cause, int voltage);
+static inline int muic_afc_request_cause_clear(void);
 #endif
 static inline int muic_hv_charger_disable(bool en) {return 0; }
 #endif

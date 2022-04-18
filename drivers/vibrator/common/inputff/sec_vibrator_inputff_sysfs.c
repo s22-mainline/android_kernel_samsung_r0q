@@ -61,10 +61,6 @@ __visible_for_testing int sec_vib_inputff_load_firmware(
 	dev_info(ddata->dev, "%s ret(%d), fw_id(%d) retry(%d) stat(%d)\n",
 		__func__, ret, ddata->fw.id, ddata->fw.retry, ddata->fw.stat);
 	mutex_lock(&ddata->fw.stat_lock);
-	if (ddata->fw.stat & FW_LOAD_SUCCESS) {
-		dev_info(ddata->dev, "%s already success\n", __func__);
-		goto err;
-	}
 
 	retry = ddata->fw.retry;
 	__pm_stay_awake(&ddata->fw.ws);
@@ -75,9 +71,10 @@ __visible_for_testing int sec_vib_inputff_load_firmware(
 		event = NOTIFY_EXTRA_VIB_FW_LOAD_SUCCESS;
 		store_usblog_notify(NOTIFY_EXTRA, (void *)&event, NULL);
 #endif
-		ddata->fw.ret[retry] |= FW_LOAD_SUCCESS;
-		ddata->fw.stat |= FW_LOAD_SUCCESS;
-		ddata->fw.load_success = true;
+		ddata->fw.ret[retry] = FW_LOAD_SUCCESS;
+		ddata->fw.stat = FW_LOAD_SUCCESS;
+		if (ddata->f0_stored && ddata->fw.id == 0)
+			ddata->vib_ops->set_f0_stored(ddata->input, ddata->f0_stored);
 	} else {
 		if (retry < FWLOAD_TRY-1) {
 			ddata->fw.ret[retry] = ret;
@@ -141,8 +138,8 @@ static void firmware_load_store_work(struct work_struct *work)
 	dev_info(ddata->dev, "%s clear retry\n", __func__);
 	ddata->fw.retry = 0;
 	for (i = 0; i < FWLOAD_TRY; i++)
-		ddata->fw.ret[i] |= FW_LOAD_STORE;
-	ddata->fw.stat |= FW_LOAD_STORE;
+		ddata->fw.ret[i] = FW_LOAD_STORE;
+	ddata->fw.stat = FW_LOAD_STORE;
 
 	queue_work(ddata->fw.fw_workqueue, &ddata->fw.wk);
 }
@@ -151,8 +148,12 @@ static ssize_t firmware_load_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
 	struct sec_vib_inputff_drvdata *ddata = dev_get_drvdata(dev);
-			
-	return sprintf(buf, "%d\n", ddata->fw.load_success);
+	bool fw_load = false;
+
+	if (ddata->fw.stat == FW_LOAD_SUCCESS)
+		fw_load = true;
+
+	return sprintf(buf, "%d\n", fw_load);
 }
 
 static ssize_t firmware_load_store(struct device *dev,
@@ -162,14 +163,13 @@ static ssize_t firmware_load_store(struct device *dev,
 	u32 fw_id = 0;
 	int ret = 0;
 
-	dev_info(ddata->dev, "%s stat(%d) retry(%d)\n", __func__,
-			ddata->fw.stat, ddata->fw.retry);
-
 	ret = kstrtou32(buf, 0, &fw_id);
 	if (ret < 0) {
 		dev_err(ddata->dev, "%s kstrtou32 error : %d\n", __func__, ret);
 		goto err;
 	}
+	dev_info(ddata->dev, "%s id(%d) stat(%d) retry(%d)\n", __func__,
+			fw_id, ddata->fw.stat, ddata->fw.retry);
 	ddata->fw.id = fw_id;
 	schedule_delayed_work(&ddata->fw.store_wk, msecs_to_jiffies(0));
 	dev_info(ddata->dev, "%s done\n", __func__);
@@ -253,11 +253,86 @@ err:
 }
 static DEVICE_ATTR_RW(ach_percent);
 
+static ssize_t trigger_calibration_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct sec_vib_inputff_drvdata *ddata = dev_get_drvdata(dev);
+	int ret;
+	u32 trigger_calibration;
+
+	ret = kstrtos32(buf, 16, &trigger_calibration);
+	if (ret < 0) {
+		dev_err(ddata->dev, "%s kstrtos32 error : %d\n", __func__, ret);
+		return ret;
+	}
+	if (ddata->vib_ops->set_trigger_cal) {
+		ret = ddata->vib_ops->set_trigger_cal(ddata->input, trigger_calibration);
+		if (ret) {
+			dev_err(ddata->dev, "%s set_trigger_cal error : %d\n", __func__, ret);
+			return -EINVAL;
+		}
+		dev_info(ddata->dev, "%s trigger_calibration : %u, ret : %d\n", __func__, trigger_calibration, ret);
+	} else {
+		dev_err(ddata->dev, "%s set_trigger_cal is NULL\n", __func__);
+		return -EOPNOTSUPP;
+	}
+	return count;
+}
+static DEVICE_ATTR_WO(trigger_calibration);
+
+static ssize_t f0_measured_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct sec_vib_inputff_drvdata *ddata = dev_get_drvdata(dev);
+
+	if (!ddata->vib_ops->get_f0_measured) {
+		dev_err(ddata->dev, "%s get_f0_measured is NULL\n", __func__);
+		return -EOPNOTSUPP;
+	}
+
+	return snprintf(buf, PAGE_SIZE, "%08X\n", ddata->vib_ops->get_f0_measured(ddata->input));
+}
+static DEVICE_ATTR_RO(f0_measured);
+
+static ssize_t f0_stored_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct sec_vib_inputff_drvdata *ddata = dev_get_drvdata(dev);
+	int ret;
+	u32 f0_stored;
+
+	ret = kstrtos32(buf, 16, &f0_stored);
+	if (ret < 0) {
+		dev_err(ddata->dev, "%s kstrtos32 error : %d\n", __func__, ret);
+		return ret;
+	}
+
+	if (ddata->vib_ops->set_f0_stored) {
+		if (ddata->fw.stat == FW_LOAD_SUCCESS && ddata->fw.id == 0) {
+			ret = ddata->vib_ops->set_f0_stored(ddata->input, f0_stored);
+			if (ret) {
+				dev_err(ddata->dev, "%s set_f0_stored error : %d\n", __func__, ret);
+				return -EINVAL;
+			}
+		}
+		ddata->f0_stored = f0_stored;
+		dev_info(ddata->dev, "%s f0_stored : %u, ret : %d\n", __func__, f0_stored, ret);
+	} else {
+		dev_err(ddata->dev, "%s set_f0_stored is NULL\n", __func__);
+		return -EOPNOTSUPP;
+	}
+	return count;
+}
+static DEVICE_ATTR_WO(f0_stored);
+
 static struct attribute *vib_inputff_sys_attr[] = {
 	&dev_attr_i2s_test.attr,
 	&dev_attr_firmware_load.attr,
 	&dev_attr_current_temp.attr,
 	&dev_attr_ach_percent.attr,
+	&dev_attr_trigger_calibration.attr,
+	&dev_attr_f0_measured.attr,
+	&dev_attr_f0_stored.attr,
 	NULL,
 };
 

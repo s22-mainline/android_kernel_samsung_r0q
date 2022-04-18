@@ -46,8 +46,7 @@ struct sec_det_conn_p_data {
 	int irq_number[DET_CONN_MAX_NUM_GPIOS];
 	unsigned int irq_type[DET_CONN_MAX_NUM_GPIOS];
 	struct sec_det_conn_info *pinfo;
-	int gpio_cnt;
-	int gpio_pm_cnt;
+	int gpio_last_cnt;
 	int gpio_total_cnt;
 };
 

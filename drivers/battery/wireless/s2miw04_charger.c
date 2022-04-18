@@ -1439,6 +1439,7 @@ static void mfc_auth_adt_send(struct mfc_charger_data *charger, u8 *srcData, int
 					MFC_STAT_H_ADT_SENT_MASK, MFC_STAT_H_ADT_SENT_MASK);
 }
 
+#if !defined(CONFIG_SEC_FACTORY)
 #define AUTH_READY 0
 #define AUTH_COMPLETE 1
 #define AUTH_OPFREQ 140
@@ -1465,6 +1466,7 @@ static void mfc_auth_set_configs(struct mfc_charger_data *charger, int opt)
 		pr_info("%s: undefined cmd(%d)\n", __func__, opt);
 	}
 }
+#endif
 
 /* uno on/off control function */
 static void mfc_set_tx_power(struct mfc_charger_data *charger, bool on)

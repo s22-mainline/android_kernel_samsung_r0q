@@ -76,65 +76,6 @@ static void manager_event_processing_by_vbus(bool run);
 static bool is_factory_jig;
 #endif
 
-static void manager_send_svid_uevent(void)
-{	
-	struct otg_notify *o_notify = get_otg_notify();
-	char *envp[5];
-	char *type = {"TYPE=usbpartner"};
-	char *state = {"STATE=ADD"};
-	char *words = {"VENDOR=samsung"};
-	char *basis = {"BASIS=entermode"};
-
-	int index = 0;
-
-	if (!o_notify) {
-		pr_err("%s o_notify is null\n", __func__);
-		goto err;
-	}
-
-	envp[index++] = type;
-	envp[index++] = state;
-	envp[index++] = words;
-	envp[index++] = basis;
-	envp[index++] = NULL;
-
-	if (send_usb_notify_uevent(o_notify, envp)) {
-		pr_err("%s error\n", __func__);
-		goto err;
-	}
-	pr_info("%s: %s %s\n", __func__, words, basis);
-err:
-	return;
-}
-
-void manager_set_tablet_source(bool set_flag)
-{
-	typec_manager.is_pr_swap_for_tablet_source = set_flag;
-	pr_info("%s : is_pr_swap_for_tablet_source = %d\n", __func__, typec_manager.is_pr_swap_for_tablet_source);
-}
-EXPORT_SYMBOL(manager_set_tablet_source);
-
-bool manager_get_tablet_source(void)
-{
-	pr_info("%s : is_pr_swap_for_tablet_source = %d\n", __func__, typec_manager.is_pr_swap_for_tablet_source);
-	return typec_manager.is_pr_swap_for_tablet_source;
-}
-EXPORT_SYMBOL(manager_get_tablet_source);
-
-void manager_set_entermode(bool set_flag)
-{
-	typec_manager.is_enter_mode_status = set_flag;
-	pr_info("%s : entermode_status = %d\n", __func__, typec_manager.is_enter_mode_status);
-}
-EXPORT_SYMBOL(manager_set_entermode);
-
-bool manager_get_entermode(void)
-{
-	pr_info("%s : entermode_status = %d\n", __func__, typec_manager.is_enter_mode_status);
-	return typec_manager.is_enter_mode_status;
-}
-EXPORT_SYMBOL(manager_get_entermode);
-
 static const char *manager_notify_string(int mns)
 {
 	switch (mns) {
@@ -664,12 +605,16 @@ static void manager_event_processing_by_vbus_work(struct work_struct *work)
 		|| typec_manager.vbus_state == STATUS_VBUS_HIGH) {
 		return;
 	} else if (typec_manager.muic.attach_state == MUIC_NOTIFY_CMD_DETACH) {
+		pr_info("%s: force usb detach", __func__);
 		manager_usb_event_send(USB_STATUS_NOTIFY_DETACH);
 		return;
 	}
 
-	manager_event_work(PDIC_NOTIFY_DEV_MANAGER, PDIC_NOTIFY_DEV_MUIC,
-		PDIC_NOTIFY_ID_ATTACH, PDIC_NOTIFY_DETACH, 0, typec_manager.muic.cable_type);
+	if (typec_manager.pdic_attach_state == PDIC_NOTIFY_DETACH) {
+		pr_info("%s: force pdic detach event", __func__);
+		manager_event_work(PDIC_NOTIFY_DEV_MANAGER, PDIC_NOTIFY_DEV_MUIC,
+			PDIC_NOTIFY_ID_ATTACH, PDIC_NOTIFY_DETACH, 0, typec_manager.muic.cable_type);
+	}
 }
 #endif
 
@@ -814,20 +759,13 @@ __visible_for_testing int manager_handle_pdic_notification(struct notifier_block
 			typec_manager.pd = p_noti.pd;
 		break;
 	case PDIC_NOTIFY_ID_SVID_INFO:
-		if (!manager_get_tablet_source()) {			
-			pr_info("%s : PDIC_NOTIFY_ID_SVID_INFO, cable_type = %d\n", __func__, typec_manager.muic.cable_type);
-			if(typec_manager.muic.attach_state){
-				manager_send_svid_uevent();
-				manager_set_tablet_source(true);
-			}
-		}
 		if (typec_manager.pd == NULL)
 			typec_manager.pd = p_noti.pd;
 		typec_manager.svid_info = p_noti.sub1;
 		break;
 	case PDIC_NOTIFY_ID_CLEAR_INFO:
 		if (p_noti.sub1 == PDIC_NOTIFY_ID_SVID_INFO)
-			typec_manager.svid_info = 0;
+			typec_manager.svid_info = -1;
 		break;
 	case PDIC_NOTIFY_ID_INITIAL:
 		return 0;
@@ -841,6 +779,7 @@ __visible_for_testing int manager_handle_pdic_notification(struct notifier_block
 	return ret;
 }
 
+#if !IS_ENABLED(CONFIG_CABLE_TYPE_NOTIFIER)
 static void manager_handle_dedicated_muic(PD_NOTI_ATTACH_TYPEDEF muic_evt)
 {
 #ifdef CONFIG_USE_DEDICATED_MUIC
@@ -904,7 +843,6 @@ static void manager_handle_second_muic(PD_NOTI_ATTACH_TYPEDEF muic_evt)
 #endif
 }
 
-
 static void manager_handle_muic(PD_NOTI_ATTACH_TYPEDEF muic_evt)
 {
 	typec_manager.muic.attach_state = muic_evt.attach;
@@ -918,12 +856,6 @@ static void manager_handle_muic(PD_NOTI_ATTACH_TYPEDEF muic_evt)
 	if (!muic_evt.attach) {
 		typec_manager.classified_cable_type = MANAGER_NOTIFY_MUIC_NONE;
 		typec_manager.usb.ufp_repeat_check = 0;
-	}
-
-	if(!manager_get_tablet_source() && manager_get_entermode()) {
-		pr_info("%s : attach_state = %d\n", __func__, typec_manager.muic.attach_state);
-		manager_send_svid_uevent();
-		manager_set_tablet_source(true);
 	}
 
 	switch (muic_evt.cable_type) {
@@ -1050,6 +982,7 @@ __visible_for_testing int manager_handle_muic_notification(struct notifier_block
 	}
 	return 0;
 }
+#endif
 
 #if IS_ENABLED(CONFIG_VBUS_NOTIFIER)
 __visible_for_testing int manager_handle_vbus_notification(struct notifier_block *nb,
@@ -1069,6 +1002,7 @@ __visible_for_testing int manager_handle_vbus_notification(struct notifier_block
 		if (!manager_check_vbus_by_otg() && typec_manager.water.detected)
 			manager_event_work(PDIC_NOTIFY_DEV_MANAGER, PDIC_NOTIFY_DEV_BATT,
 				PDIC_NOTIFY_ID_WATER, PDIC_NOTIFY_ATTACH, 0, typec_manager.water.report_type);
+		manager_event_processing_by_vbus(false);
 		break;
 	case STATUS_VBUS_LOW:
 		typec_manager.vbus_by_otg_detection = 0;
@@ -1208,11 +1142,14 @@ int manager_notifier_register(struct notifier_block *nb, notifier_fn_t notifier,
 			pdic_event_id_string(m_noti.id),
 			m_noti.sub3, m_noti.sub1 ? "Attached" : "Detached");
 		nb->notifier_call(nb, m_noti.id, &(m_noti));
-		m_noti.id = PDIC_NOTIFY_ID_SVID_INFO;
-		m_noti.sub1 = typec_manager.svid_info;
-		m_noti.sub2 = 0;
-		m_noti.sub3 = 0;
-		nb->notifier_call(nb, m_noti.id, &(m_noti));
+		if (typec_manager.svid_info >= 0) {
+			m_noti.dest = PDIC_NOTIFY_DEV_ALL;
+			m_noti.id = PDIC_NOTIFY_ID_SVID_INFO;
+			m_noti.sub1 = typec_manager.svid_info;
+			m_noti.sub2 = 0;
+			m_noti.sub3 = 0;
+			nb->notifier_call(nb, m_noti.id, &(m_noti));
+		}
 #else
 		pr_info("%s: [BATTERY] Registration completed\n", __func__);
 #endif
@@ -1484,6 +1421,7 @@ static int manager_notifier_init(void)
 	typec_manager.water.wVbus_det = 0;
 	typec_manager.water.detOnPowerOff = 0;
 	typec_manager.alt_is_support = 0;
+	typec_manager.svid_info = -1;
 	strncpy(typec_manager.fac_control,
 		"On_All", sizeof(typec_manager.fac_control)-1);
 	typec_manager.usb_factory = check_factory_mode_boot();

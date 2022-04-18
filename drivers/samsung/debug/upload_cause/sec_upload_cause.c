@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2020 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2020-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #define pr_fmt(fmt)     KBUILD_MODNAME ":%s() " fmt, __func__
@@ -18,6 +18,7 @@
 #include <linux/slab.h>
 
 #include <linux/samsung/builder_pattern.h>
+#include <linux/samsung/of_early_populate.h>
 #include <linux/samsung/debug/sec_upload_cause.h>
 
 struct upload_cause_notify {
@@ -354,7 +355,7 @@ static int __upldc_parse_dt_panic_notifier_priority(struct builder *bd,
 	return 0;
 }
 
-static struct dt_builder __upldc_dt_builder[] = {
+static const struct dt_builder __upldc_dt_builder[] = {
 	DT_BUILDER(__upldc_parse_dt_panic_notifier_priority),
 };
 
@@ -476,7 +477,7 @@ static int __upldc_remove(struct platform_device *pdev,
 }
 
 #if IS_ENABLED(CONFIG_KUNIT) && IS_ENABLED(CONFIG_UML)
-static struct dev_builder __upldc_mock_dev_builder[] = {
+static const struct dev_builder __upldc_mock_dev_builder[] = {
 	DEVICE_BUILDER(__upldc_probe_prolog, NULL),
 	DEVICE_BUILDER(__upldc_probe_epilog, __upldc_remove_prolog),
 };
@@ -494,7 +495,7 @@ int kunit_upldc_mock_remove(struct platform_device *pdev)
 }
 #endif
 
-static struct dev_builder __upldc_dev_builder[] = {
+static const struct dev_builder __upldc_dev_builder[] = {
 	DEVICE_BUILDER(__upldc_parse_dt, NULL),
 	DEVICE_BUILDER(__upldc_probe_prolog, __upldc_remove_epilog),
 	DEVICE_BUILDER(__upldc_register_panic_notifier,
@@ -534,13 +535,19 @@ static struct platform_driver sec_upldc_driver = {
 
 static __init int sec_upldc_init(void)
 {
-	return platform_driver_register(&sec_upldc_driver);
+	int err;
+
+	err = platform_driver_register(&sec_upldc_driver);
+	if (err)
+		return err;
+
+	err = __of_platform_early_populate_init(sec_upldc_match_table);
+	if (err)
+		return err;
+
+	return 0;
 }
-#if IS_BUILTIN(CONFIG_SEC_UPLOAD_CAUSE)
-pure_initcall(sec_upldc_init);
-#else
-module_init(sec_upldc_init);
-#endif
+core_initcall_sync(sec_upldc_init);
 
 static __exit void sec_upldc_exit(void)
 {

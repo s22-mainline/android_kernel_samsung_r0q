@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2019-2020 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2019-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #define pr_fmt(fmt)     KBUILD_MODNAME ":%s() " fmt, __func__
@@ -14,6 +14,7 @@
 #include <linux/mutex.h>
 #include <linux/notifier.h>
 #include <linux/of.h>
+#include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/ratelimit.h>
 #include <linux/slab.h>
@@ -21,6 +22,7 @@
 
 #include <linux/samsung/bsp/sec_key_notifier.h>
 #include <linux/samsung/builder_pattern.h>
+#include <linux/samsung/of_early_populate.h>
 #include <linux/samsung/debug/sec_debug.h>
 #include <linux/samsung/debug/sec_log_buf.h>
 
@@ -344,7 +346,7 @@ static int __crashkey_parse_dt_desired_pattern(struct builder *bd,
 	return 0;
 }
 
-static struct dt_builder __crashkey_dt_builder[] = {
+static const struct dt_builder __crashkey_dt_builder[] = {
 	DT_BUILDER(__crashkey_parse_dt_name),
 	DT_BUILDER(__crashkey_parse_dt_check_debug_level),
 	DT_BUILDER(__crashkey_parse_dt_panic_msg),
@@ -504,7 +506,7 @@ static int __crashkey_probe_epilog(struct builder *bd)
 }
 
 static int __crashkey_probe(struct platform_device *pdev,
-		struct dev_builder *builder, ssize_t n)
+		const struct dev_builder *builder, ssize_t n)
 {
 	struct device *dev = &pdev->dev;
 	struct crashkey_drvdata *drvdata;
@@ -519,7 +521,7 @@ static int __crashkey_probe(struct platform_device *pdev,
 }
 
 static int __crashkey_remove(struct platform_device *pdev,
-		struct dev_builder *builder, ssize_t n)
+		const struct dev_builder *builder, ssize_t n)
 {
 	struct crashkey_drvdata *drvdata = platform_get_drvdata(pdev);
 
@@ -596,7 +598,7 @@ static int __crashkey_mock_parse_dt_desired_pattern(struct builder *bd)
 	return 0;
 }
 
-static struct dev_builder __crashkey_mock_dev_builder[] = {
+static const struct dev_builder __crashkey_mock_dev_builder[] = {
 	DEVICE_BUILDER(__crashkey_mock_parse_dt_name, NULL),
 	DEVICE_BUILDER(__crashkey_mock_parse_dt_interval, NULL),
 	DEVICE_BUILDER(__crashkey_mock_parse_dt_desired_pattern, NULL),
@@ -619,7 +621,7 @@ int kunit_crashkey_mock_remove(struct platform_device *pdev)
 }
 #endif
 
-static struct dev_builder __crashkey_dev_builder[] = {
+static const struct dev_builder __crashkey_dev_builder[] = {
 	DEVICE_BUILDER(__crashkey_parse_dt, NULL),
 	DEVICE_BUILDER(__crashkey_probe_prolog, NULL),
 	DEVICE_BUILDER(__crashkey_add_to_crashkey_dev_list,
@@ -679,6 +681,10 @@ static int __init sec_crashkey_init(void)
 	int err;
 
 	err = platform_driver_register(&sec_crashkey_driver);
+	if (err)
+		return err;
+
+	err = __of_platform_early_populate_init(sec_crashkey_match_table);
 	if (err)
 		return err;
 

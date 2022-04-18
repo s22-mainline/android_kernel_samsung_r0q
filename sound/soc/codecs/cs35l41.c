@@ -718,6 +718,7 @@ static irqreturn_t cs35l41_irq(int irq, void *data)
 					CS35L41_AMP_SHORT_ERR_RLS);
 		regmap_update_bits(cs35l41->regmap, CS35L41_PROTECT_REL_ERR_IGN,
 					CS35L41_AMP_SHORT_ERR_RLS, 0);
+		cirrus_bd_amp_err(cs35l41->pdata.mfd_suffix);
 	}
 
 	if (status[0] & CS35L41_TEMP_WARN) {
@@ -802,6 +803,7 @@ static irqreturn_t cs35l41_irq(int irq, void *data)
 					CS35L41_BST_EN_SHIFT,
 					CS35L41_BST_EN_DEFAULT <<
 					CS35L41_BST_EN_SHIFT);
+		cirrus_bd_bst_short(cs35l41->pdata.mfd_suffix);
 	}
 
 	if (status[3] & CS35L41_OTP_BOOT_DONE) {

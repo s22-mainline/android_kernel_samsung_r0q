@@ -44,6 +44,7 @@
 #include <uapi/linux/falloc.h>
 #include <uapi/linux/sched/types.h>
 #include <trace/hooks/mm.h>
+#include <uapi/linux/magic.h>
 
 #include "zram_drv.h"
 #include "../loop.h"
@@ -356,6 +357,11 @@ static int zram_pin_backing_file(struct zram *zram)
 	int __user *buf;
 	int set = F2FS_SET_PIN_FILE;
 	int ret;
+
+	if (file->f_inode->i_sb->s_magic != F2FS_SUPER_MAGIC) {
+		pr_info("%s skipped due to loop_device is not F2FS\n", __func__);
+		return 0;
+	}
 
 	buf = compat_alloc_user_space(sizeof(*buf));
 	if (!buf) {
@@ -1900,6 +1906,7 @@ static void zram_handle_remain(struct zram *zram, struct page *page,
 	struct zram_wb_header *zhdr;
 	unsigned long alloced_pages;
 	unsigned long handle;
+	unsigned long flags;
 	unsigned int offset = 0;
 	unsigned int size;
 	u32 index;
@@ -1954,6 +1961,11 @@ static void zram_handle_remain(struct zram *zram, struct page *page,
 		zram_free_page(zram, index);
 		zram_set_element(zram, index, handle);
 		zram_set_obj_size(zram, index, size);
+		spin_lock_irqsave(&zram->list_lock, flags);
+		list_add_tail(&zram->table[index].lru_list, &zram->list);
+		spin_unlock_irqrestore(&zram->list_lock, flags);
+		zram_set_flag(zram, index, ZRAM_LRU);
+		atomic64_inc(&zram->stats.lru_pages);
 		zram_slot_unlock(zram, index);
 		atomic64_inc(&zram->stats.pages_stored);
 next:

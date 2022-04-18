@@ -496,10 +496,12 @@ static int pm8941_pwrkey_probe(struct platform_device *pdev)
 			pr_info("%s: pon_kpdpwr", __func__);
 			sec_pon.key_dev[SEC_PON_KPDPWR] = pwrkey;
 			sec_pon.reset_dev = pwrkey;
+			pm8941_pwrkey_irq(pwrkey->irq, pwrkey);
 		}
 		else if (!strncmp(pwrkey->data->name, "pmic_resin", 10)) {
 			pr_info("%s: pon_resin", __func__);
 			sec_pon.key_dev[SEC_PON_RESIN] = pwrkey;
+			pm8941_pwrkey_irq(pwrkey->irq, pwrkey);
 		}
 	}
 	pwrkey->wake_enabled = true;

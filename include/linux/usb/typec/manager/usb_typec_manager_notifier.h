@@ -166,8 +166,6 @@ typedef struct _manager_data_t
 	struct manager_dp dp;
 	struct notifier_block manager_external_notifier_nb; 
 	struct typec_manager_gadget_ops *gadget_ops;
-	bool is_pr_swap_for_tablet_source;
-	bool is_enter_mode_status;
 }manager_data_t;
 
 struct typec_manager_gadget_ops {
@@ -191,7 +189,7 @@ struct typec_manager_gadget_ops {
 #endif
 
 /* Timeout for USB off when Vbus is in LOW state */
-#define VBUS_USB_OFF_TIMEOUT 1000
+#define VBUS_USB_OFF_TIMEOUT 2000
 
 /* Time to check whether it is VBUS by OTG to prevent moisture popup error */
 #define OTG_VBUS_CHECK_TIME 300
@@ -222,8 +220,4 @@ void manager_notifier_usbdp_support(void);
 void set_usb_enumeration_state(int state);
 void set_usb_enable_state(void);
 void probe_typec_manager_gadget_ops (struct typec_manager_gadget_ops *ops);
-void manager_set_tablet_source(bool set_flag);
-bool manager_get_tablet_source(void);
-void manager_set_entermode(bool set_flag);
-bool manager_get_entermode(void);
 #endif /* __USB_TYPEC_MANAGER_NOTIFIER_H__ */

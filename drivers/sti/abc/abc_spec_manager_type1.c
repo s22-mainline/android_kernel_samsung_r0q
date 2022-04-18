@@ -30,8 +30,7 @@ int abc_alloc_memory_to_buffer_type1(struct spec_data_type1 *spec_type1, int max
 
 	if (!spec_type1->buffer.abc_element) {
 
-		ABC_PRINT("%s : Failed to allocate memory to buffer", __func__);
-		spec_type1->common_spec.enabled = 0;
+		ABC_PRINT("Failed to allocate memory to buffer");
 		spec_type1->buffer.buffer_max = 0;
 		spec_type1->buffer.size = 0;
 		return -ENOMEM;
@@ -54,17 +53,17 @@ int abc_parse_dt_type1(struct device *dev,
 	int i, spec_cnt, max_cnt = 0;
 
 	if (of_property_read_string_index(np, MODULE_KEY, idx, &spec_type1->common_spec.module_name)) {
-		dev_err(dev, "Failed to get module name : node not exist\n");
+		dev_err(dev, "Failed to get module name : node not exist");
 		return -EINVAL;
 	}
 
 	if (of_property_read_string_index(np, ERROR_KEY, idx, &spec_type1->common_spec.error_name)) {
-		dev_err(dev, "Failed to get error name : node not exist\n");
+		dev_err(dev, "Failed to get error name : node not exist");
 		return -EINVAL;
 	}
 
 	if (of_property_read_u32_index(np, SPEC_CNT_KEY, idx, &spec_type1->common_spec.spec_cnt)) {
-		dev_err(dev, "Failed to get mode cnt : node not exist\n");
+		dev_err(dev, "Failed to get mode cnt : node not exist");
 		return -EINVAL;
 	}
 
@@ -82,13 +81,13 @@ int abc_parse_dt_type1(struct device *dev,
 
 		snprintf(temp, ABC_BUFFER_MAX, "th_cnt_list%d", i);
 		if (of_property_read_u32_index(np, temp, idx, &spec_type1->th_cnt[i])) {
-			dev_err(dev, "Failed to get th count : node not exist\n");
+			dev_err(dev, "Failed to get th count : node not exist");
 			return -EINVAL;
 		}
 
 		snprintf(temp, ABC_BUFFER_MAX, "th_time_list%d", i);
 		if (of_property_read_u32_index(np, temp, idx, &spec_type1->th_time[i])) {
-			dev_err(dev, "Failed to get th time : node not exist\n");
+			dev_err(dev, "Failed to get th time : node not exist");
 			return -EINVAL;
 		}
 
@@ -98,8 +97,8 @@ int abc_parse_dt_type1(struct device *dev,
 		if (spec_type1->th_time[i] == 0)
 			spec_type1->th_time[i] = INT_MAX;
 
-		ABC_PRINT("%s : type1-spec(%d) : module(%s) error(%s) th_cnt(%d) th_time(%d)",
-			  __func__, i,
+		ABC_PRINT("type1-spec(%d) : module(%s) error(%s) th_cnt(%d) th_time(%d)",
+			  i,
 			  spec_type1->common_spec.module_name,
 			  spec_type1->common_spec.error_name,
 			  spec_type1->th_cnt[i],
@@ -109,13 +108,9 @@ int abc_parse_dt_type1(struct device *dev,
 	if (abc_alloc_memory_to_buffer_type1(spec_type1, max_cnt + 1))
 		return -ENOMEM;
 
-	spec_type1->common_spec.enabled = spec_type1->th_cnt[0] == SPEC_DISABLED ? 0 : 1;
-
-	ABC_PRINT("%s : module(%s) error(%s) enabled(%d)",
-			  __func__,
+	ABC_PRINT("module(%s) error(%s)",
 			  spec_type1->common_spec.module_name,
-			  spec_type1->common_spec.error_name,
-			  spec_type1->common_spec.enabled);
+			  spec_type1->common_spec.error_name);
 
 	return 0;
 }
@@ -133,25 +128,7 @@ struct abc_common_spec_data *sec_abc_get_matched_common_spec_type1(struct abc_ke
 	}
 	return NULL;
 }
-bool sec_abc_reached_spec_type1_pre(struct abc_common_spec_data *common_spec, struct abc_pre_event *pre_event)
-{
-	struct spec_data_type1 *spec_type1;
-	int current_spec = common_spec->current_spec;
 
-	spec_type1 = container_of(common_spec, struct spec_data_type1, common_spec);
-
-	ABC_PRINT("Pre_event %s : MODULE(%s) WARN(%s) current_spec(%d) warn_cnt(%d) time(%d)\n",
-			  __func__,
-			  spec_type1->common_spec.module_name,
-			  spec_type1->common_spec.error_name,
-			  current_spec,
-			  pre_event->cnt,
-			  pre_event->cur_time);
-
-	if (pre_event->cnt >= spec_type1->th_cnt[current_spec])
-		return true;
-	return false;
-}
 bool sec_abc_reached_spec_type1(struct abc_common_spec_data *common_spec, unsigned int cur_time)
 {
 	struct spec_data_type1 *spec_type1;
@@ -161,8 +138,7 @@ bool sec_abc_reached_spec_type1(struct abc_common_spec_data *common_spec, unsign
 
 	do_div(cur_time, MSEC_PER_SEC);
 
-	ABC_PRINT("%s : MODULE(%s) WARN(%s) current_spec(%d) warn_cnt(%d) time(%d)\n",
-			  __func__,
+	ABC_PRINT("MODULE(%s) WARN(%s) current_spec(%d) warn_cnt(%d) time(%d)",
 			  spec_type1->common_spec.module_name,
 			  spec_type1->common_spec.error_name,
 			  current_spec,
@@ -171,8 +147,8 @@ bool sec_abc_reached_spec_type1(struct abc_common_spec_data *common_spec, unsign
 
 	if (spec_type1->buffer.warn_cnt >= spec_type1->th_cnt[current_spec]) {
 		if (sec_abc_get_diff_time_type1(&spec_type1->buffer) < spec_type1->th_time[current_spec]) {
-			ABC_PRINT("%s : %s occurred. current_spec(%d). Send uevent.\n",
-					 __func__, spec_type1->common_spec.error_name, current_spec);
+			ABC_PRINT("%s occurred. current_spec(%d). Send uevent",
+					 spec_type1->common_spec.error_name, current_spec);
 			return true;
 		}
 		sec_abc_dequeue_event_data_type1(common_spec);
@@ -206,9 +182,9 @@ bool sec_abc_is_empty_type1(struct abc_event_buffer *buffer)
 void sec_abc_enqueue_type1(struct abc_event_buffer *buffer, struct abc_fault_info in)
 {
 	if (sec_abc_is_full_type1(buffer)) {
-		ABC_PRINT("%s : queue is full.\n", __func__);
+		ABC_PRINT("queue is full");
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("queue is full.\n");
+		abc_common_test_get_log_str("queue is full");
 #endif
 	} else {
 		buffer->rear = (buffer->rear + 1) % buffer->size;
@@ -221,9 +197,9 @@ struct abc_fault_info sec_abc_dequeue_type1(struct abc_event_buffer *buffer)
 	struct abc_fault_info out;
 
 	if (sec_abc_is_empty_type1(buffer)) {
-		ABC_PRINT("%s : queue is empty.\n", __func__);
+		ABC_PRINT("queue is empty");
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-		abc_common_test_get_log_str("queue is empty.\n");
+		abc_common_test_get_log_str("queue is empty");
 #endif
 		out.cur_time = out.cur_cnt = 0;
 	} else {
@@ -262,8 +238,7 @@ int sec_abc_get_diff_time_type1(struct abc_event_buffer *buffer)
 	front_time = buffer->abc_element[(buffer->front + 1) % buffer->size].cur_time;
 	rear_time = buffer->abc_element[buffer->rear].cur_time;
 
-	ABC_PRINT("%s : front time : %d sec (%d) rear_time %d sec (%d) diff : %d\n",
-		  __func__,
+	ABC_PRINT("front time : %d sec (%d) rear_time %d sec (%d) diff : %d",
 		  front_time,
 		  buffer->front + 1,
 		  rear_time,

@@ -58,8 +58,8 @@ static __always_inline int sec_director_parse_dt(struct builder *bd,
 
 		err = parse_dt(bd, np);
 		if (err) {
-			dev_err(dev, "failed to parse a device tree - %ps (%d)\n",
-					parse_dt, err);
+			dev_err(dev, "failed to parse a device tree - [%zu] %ps (%d)\n",
+					i, parse_dt, err);
 			return err;
 		}
 	}
@@ -89,8 +89,8 @@ static __always_inline int sec_director_construct_dev(struct builder *bd,
 
 		err = construct_dev(bd);
 		if (err) {
-			dev_err(dev, "failed to construct_dev a device - %ps (%d)\n",
-					construct_dev, err);
+			dev_err(dev, "failed to construct_dev a device - [%zu] %ps (%d)\n",
+					i, construct_dev, err);
 			*last_failed = -i;
 			return err;
 		}

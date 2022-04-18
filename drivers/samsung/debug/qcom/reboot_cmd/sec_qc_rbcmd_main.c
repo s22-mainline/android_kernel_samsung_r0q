@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * COPYRIGHT(C) 2020 Samsung Electronics Co., Ltd. All Right Reserved.
+ * COPYRIGHT(C) 2020-2022 Samsung Electronics Co., Ltd. All Right Reserved.
  */
 
 #define pr_fmt(fmt)     KBUILD_MODNAME ":%s() " fmt, __func__
@@ -120,7 +120,7 @@ static int __rbcmd_parse_dt_use_on_restart(struct builder *bd,
 	return 0;
 }
 
-static struct dt_builder __qc_rbcmd_dt_builder[] = {
+static const struct dt_builder __qc_rbcmd_dt_builder[] = {
 	DT_BUILDER(__rbcmd_parse_dt_use_on_reboot),
 	DT_BUILDER(__rbcmd_parse_dt_use_on_restart),
 };
@@ -179,7 +179,7 @@ static int __rbcmd_mock_parse_dt(struct builder *bd)
 	return 0;
 }
 
-static struct dev_builder __qc_rbcmd_mock_dev_builder[] = {
+static const struct dev_builder __qc_rbcmd_mock_dev_builder[] = {
 	DEVICE_BUILDER(__rbcmd_mock_parse_dt, NULL),
 	DEVICE_BUILDER(sec_qc_rbcmd_init_on_reboot,
 		       sec_qc_rbcmd_exit_on_reboot),
@@ -203,7 +203,7 @@ int kunit_qc_rbcmd_mock_remove(struct platform_device *pdev)
 }
 #endif
 
-static struct dev_builder __qc_rbcmd_dev_builder[] = {
+static const struct dev_builder __qc_rbcmd_dev_builder[] = {
 	DEVICE_BUILDER(__rbcmd_parse_dt, NULL),
 	DEVICE_BUILDER(__qc_rbcmd_init_on_reboot,
 		       __qc_rbcmd_exit_on_reboot),

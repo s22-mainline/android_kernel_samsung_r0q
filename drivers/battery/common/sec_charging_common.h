@@ -239,6 +239,7 @@ enum sec_battery_charge_mode {
 	SEC_BAT_CHG_MODE_UNO_ON,
 	SEC_BAT_CHG_MODE_UNO_OFF,
 	SEC_BAT_CHG_MODE_UNO_ONLY,
+	SEC_BAT_CHG_MODE_NOT_SET,
 	SEC_BAT_CHG_MODE_MAX,
 };
 
@@ -356,6 +357,12 @@ enum tx_switch_mode_state {
 	TX_SWITCH_CHG_ONLY,
 	TX_SWITCH_UNO_ONLY,
 	TX_SWITCH_GEAR_PPS, /* temporary mode */
+};
+
+enum d2d_auth_type {
+	D2D_AUTH_NONE = 0,
+	D2D_AUTH_SRC,
+	D2D_AUTH_SNK,
 };
 
 enum d2d_mode {

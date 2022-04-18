@@ -66,6 +66,15 @@ void cirrus_amp_register_i2c_error_callback(const char *suffix, void *func)
 }
 EXPORT_SYMBOL_GPL(cirrus_amp_register_i2c_error_callback);
 
+void cirrus_amp_register_error_callback(const char *suffix, void *func)
+{
+	struct cirrus_amp *amp = cirrus_get_amp_from_suffix(suffix);
+
+	if (amp)
+		amp->error_callback = func;
+}
+EXPORT_SYMBOL_GPL(cirrus_amp_register_error_callback);
+
 int cirrus_amp_add(const char *mfd_suffix, struct cirrus_amp_config cfg)
 {
 	struct cirrus_amp *amp = cirrus_get_amp_from_suffix(mfd_suffix);

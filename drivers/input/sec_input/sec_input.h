@@ -46,7 +46,9 @@
 #include "sec_tclm_v2.h"
 
 #if !IS_ENABLED(CONFIG_QGKI) && IS_ENABLED(CONFIG_TOUCHSCREEN_DUAL_FOLDABLE)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 43))	/* default gki */
 #define DUAL_FOLDABLE_GKI
+#endif
 #endif
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0))
@@ -200,6 +202,7 @@ const struct file_operations ops_name = {				\
 /*
  * for input_event_codes.h
  */
+#define KEY_HOT			252
 #define KEY_WAKEUP_UNLOCK	253	/* Wake-up to recent view, ex: AOP */
 #define KEY_RECENT		254
 
@@ -209,6 +212,7 @@ const struct file_operations ops_name = {				\
 #define BTN_LARGE_PALM		0x119	/* large palm flag */
 
 #define KEY_BLACK_UI_GESTURE	0x1c7
+#define KEY_EMERGENCY		0x2a0
 #define KEY_INT_CANCEL		0x2be	/* for touch event skip */
 #define KEY_DEX_ON		0x2bd
 #define KEY_WINK		0x2bf	/* Intelligence Key */
@@ -227,6 +231,8 @@ const struct file_operations ops_name = {				\
 #else
 #define SW_PEN_INSERT		0x13  /* set = pen insert, remove */
 #endif
+
+#define EXYNOS_DISPLAY_INPUT_NOTIFIER ((IS_ENABLED(CONFIG_EXYNOS_DPU30) || IS_ENABLED(CONFIG_DRM_SAMSUNG_DPU)) && IS_ENABLED(CONFIG_PANEL_NOTIFY))
 
 enum grip_write_mode {
 	G_NONE				= 0,
@@ -703,6 +709,7 @@ struct sec_ts_plat_data {
 	bool chip_on_board;
 	bool enable_sysinput_enabled;
 	bool not_support_io_ldo;
+	bool not_support_vdd;
 	bool sense_off_when_cover_closed;
 
 	struct completion resume_done;
@@ -715,6 +722,12 @@ struct sec_ts_plat_data {
 	u32 print_info_cnt_release;
 	u32 print_info_cnt_open;
 	u16 print_info_currnet_mode;
+};
+
+struct sec_ts_secure_data {
+	int (*stui_tsp_enter)(void);
+	int (*stui_tsp_exit)(void);
+	int (*stui_tsp_type)(void);
 };
 
 #ifdef TCLM_CONCEPT

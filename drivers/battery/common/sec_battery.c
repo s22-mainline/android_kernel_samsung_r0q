@@ -215,6 +215,7 @@ char *sec_bat_charge_mode_str[] = {
 	"UNO-On",
 	"UNO-Off",
 	"UNO-Only",
+	"Not-Set",
 	"Max",
 };
 
@@ -492,10 +493,14 @@ int get_chg_power_type(int ct, int ws, int pd_max_pw, int max_pw)
 
 static void sec_bat_run_input_check_work(struct sec_battery_info *battery, int work_delay)
 {
+	unsigned int ws_duration = 0;
+	unsigned int offset = 3; /* 3 seconds */
+
 	pr_info("%s: for %s after %d msec\n", __func__, sec_cable_type[battery->cable_type], work_delay);
 
 	cancel_delayed_work(&battery->input_check_work);
-	__pm_stay_awake(battery->input_ws);
+	ws_duration = offset + (work_delay / 1000);
+	__pm_wakeup_event(battery->input_ws, jiffies_to_msecs(HZ * ws_duration));
 	queue_delayed_work(battery->monitor_wqueue,
 		&battery->input_check_work, msecs_to_jiffies(work_delay));
 }
@@ -503,7 +508,6 @@ static void sec_bat_run_input_check_work(struct sec_battery_info *battery, int w
 static void sec_bat_cancel_input_check_work(struct sec_battery_info *battery)
 {
 	cancel_delayed_work(&battery->input_check_work);
-	__pm_relax(battery->input_ws);
 	battery->input_check_cnt = 0;
 }
 
@@ -941,7 +945,7 @@ int sec_bat_set_charge(void * data, int chg_mode)
 	union power_supply_propval val = {0, };
 	struct timespec64 ts = {0, };
 
-	if (chg_mode == SEC_BAT_CHG_MODE_UNO_ONLY) {
+	if (chg_mode == SEC_BAT_CHG_MODE_NOT_SET) {
 		pr_info("%s: temp mode for decrease 5v\n", __func__);
 		return chg_mode;
 	}
@@ -2834,8 +2838,7 @@ static unsigned int sec_bat_get_polling_time(
 			battery->polling_time =	battery->pdata->polling_time[battery->status];
 
 		if (!battery->wc_enable ||
-			(battery->vpdo_src_auth && (battery->pdata->d2d_check_type == SB_D2D_SRCSNK)) ||
-			(battery->fpdo_src_auth && (battery->pdata->d2d_check_type == SB_D2D_SNKONLY))) {
+			(battery->d2d_auth == D2D_AUTH_SRC)) {
 			battery->polling_time = battery->pdata->polling_time[SEC_BATTERY_POLLING_TIME_CHARGING];
 			pr_info("%s: wc_enable is false, or hp d2d, polling time is 30sec\n", __func__);
 		}
@@ -3337,8 +3340,7 @@ static int sec_bat_check_skip_monitor(struct sec_battery_info *battery)
 	if (battery->polling_in_sleep) {
 		battery->polling_in_sleep = false;
 		if (battery->status == POWER_SUPPLY_STATUS_DISCHARGING && !battery->wc_tx_enable &&
-			(!battery->vpdo_src_auth || (battery->pdata->d2d_check_type != SB_D2D_SRCSNK)) &&
-			(!battery->fpdo_src_auth || (battery->pdata->d2d_check_type != SB_D2D_SNKONLY))) {
+			(battery->d2d_auth != D2D_AUTH_SRC)) {
 			if ((unsigned long)(c_ts.tv_sec - old_ts.tv_sec) < 10 * 60) {
 				val.intval = SEC_BATTERY_VOLTAGE_MV;
 				psy_do_property(battery->pdata->fuelgauge_name, get,
@@ -3490,7 +3492,7 @@ static void sec_bat_d2d_check(struct sec_battery_info *battery,
 	int auth = AUTH_LOW_PWR;
 
 	if ((battery->pdata->d2d_check_type == SB_D2D_NONE) ||
-		(!battery->vpdo_src_auth && !battery->fpdo_src_auth) ||
+		(battery->d2d_auth != D2D_AUTH_SRC) ||
 		battery->vpdo_ocp) {
 		return;
 	}
@@ -3541,11 +3543,6 @@ static void sec_bat_d2d_check(struct sec_battery_info *battery,
 			(auth == AUTH_LOW_PWR) ? "LOW PWR" : "HIGH PWR", battery->hp_d2d);
 
 	if (battery->vpdo_auth_stat != auth) {
-		if ((auth == AUTH_HIGH_PWR) &&
-			(battery->pdata->d2d_check_type == SB_D2D_SRCSNK)) {
-			sec_vote(battery->chgen_vote, VOTER_D2D_WIRE,
-				true, SEC_BAT_CHG_MODE_BUCK_OFF);
-		}
 		sec_pd_vpdo_auth(auth, battery->pdata->d2d_check_type);
 
 		pr_info("%s : vpdo auth changed\n", __func__);
@@ -4651,7 +4648,6 @@ __visible_for_testing void sec_bat_input_check_work(struct work_struct *work)
 	}
 
 	dev_info(battery->dev, "%s: End\n", __func__);
-	__pm_relax(battery->input_ws);
 }
 
 static int sec_bat_set_property(struct power_supply *psy,
@@ -5053,8 +5049,12 @@ static int sec_bat_set_property(struct power_supply *psy,
 		case POWER_SUPPLY_EXT_PROP_CHARGE_OTG_CONTROL:
 			value.intval = val->intval;
 			pr_info("%s: d2d reverse boost : %d\n", __func__, val->intval);
+			if (val->intval)
+				sec_vote(battery->chgen_vote, VOTER_D2D_WIRE, true, SEC_BAT_CHG_MODE_BUCK_OFF);
 			psy_do_property(battery->pdata->charger_name, set,
 				POWER_SUPPLY_EXT_PROP_D2D_REVERSE_VOLTAGE, value);
+			if (!val->intval)
+				sec_vote(battery->chgen_vote, VOTER_D2D_WIRE, false, 0);
 			break;
 		default:
 			return -EINVAL;
@@ -6294,14 +6294,11 @@ static void sb_disable_reverse_boost(struct sec_battery_info *battery)
 		POWER_SUPPLY_EXT_PROP_D2D_REVERSE_VOLTAGE, value);
 	battery->vpdo_src_boost = value.intval ? true : false;
 
-	if (battery->vpdo_src_auth) {
-		if (battery->vpdo_src_boost) {
-			/* turn off dc reverse boost */
-			value.intval = 0;
-			psy_do_property(battery->pdata->charger_name, set,
-				POWER_SUPPLY_EXT_PROP_D2D_REVERSE_VOLTAGE, value);
-		}
-		battery->vpdo_src_auth = false;
+	if (battery->vpdo_src_boost) {
+		/* turn off dc reverse boost */
+		value.intval = 0;
+		psy_do_property(battery->pdata->charger_name, set,
+			POWER_SUPPLY_EXT_PROP_D2D_REVERSE_VOLTAGE, value);
 	}
 }
 
@@ -6379,41 +6376,35 @@ static int usb_typec_handle_id_power_status(struct sec_battery_info *battery,
 		battery->init_src_cap = false;
 		battery->hv_pdo = false;
 
+		if (battery->pdata->d2d_check_type == SB_D2D_NONE)
+			return 0;
+
 		/* for 15w d2d snk to src prswap */
-		if ((battery->pdata->d2d_check_type == SB_D2D_SRCSNK) &&
-				battery->vpdo_snk_auth) {
-			battery->vpdo_src_auth = true;
-			battery->vpdo_snk_auth = false;
-		} else if ((battery->pdata->d2d_check_type == SB_D2D_SNKONLY) &&
-				battery->vpdo_snk_auth) {
-			battery->fpdo_src_auth = true;
+		if (battery->pdata->d2d_check_type == SB_D2D_SNKONLY) {
 			value.intval = 1;
 			psy_do_property(battery->pdata->otg_name, set,
 				POWER_SUPPLY_PROP_VOLTAGE_MAX, value);
-			battery->vpdo_snk_auth = false;
-			/* need to set 7.5w otg */
-			sec_bat_d2d_check(battery, battery->capacity,
-				battery->temperature, battery->lrp);
-			pr_info("%s set 7.5w otg\n", __func__);
 		}
+
+		if (battery->d2d_auth == D2D_AUTH_SNK)
+			battery->d2d_auth = D2D_AUTH_SRC;
 		return 0;
 	case PDIC_NOTIFY_EVENT_PD_PRSWAP_SRCTOSNK:
 		*cmd = "PD_PRWAP";
 		dev_info(battery->dev, "%s: PRSWAP_SRCTOSNK(%d)\n", __func__, pdata->attach);
 
-		if ((battery->pdata->d2d_check_type == SB_D2D_SRCSNK) &&
-				battery->vpdo_src_auth) {
-			sb_disable_reverse_boost(battery);
-			battery->vpdo_ocp = false;
-			battery->vpdo_snk_auth = true;
-			battery->vpdo_src_auth = false;
-		} else if (battery->pdata->d2d_check_type == SB_D2D_SNKONLY) {
-			battery->vpdo_snk_auth = true;
-			battery->fpdo_src_auth = false;
+		if (battery->d2d_auth == D2D_AUTH_SRC) {
+			if (battery->pdata->d2d_check_type == SB_D2D_SRCSNK) {
+				sb_disable_reverse_boost(battery);
+				battery->vpdo_ocp = false;
+			}
+			battery->d2d_auth = D2D_AUTH_SNK;
+
 			value.intval = 0;
 			psy_do_property(battery->pdata->otg_name, set,
 				POWER_SUPPLY_PROP_VOLTAGE_MAX, value);
 		}
+
 		battery->vpdo_auth_stat = AUTH_NONE;
 		battery->hp_d2d = HP_D2D_NONE;
 		sec_vote(battery->chgen_vote, VOTER_D2D_WIRE, false, 0);
@@ -6480,7 +6471,7 @@ static int usb_typec_handle_id_power_status(struct sec_battery_info *battery,
 		if (battery->sink_status.power_list[current_pdo].pdo_type == VPDO_TYPE) {
 			battery->hv_chg_name = "PDIC_VPDO";
 			if ((battery->pdata->d2d_check_type == SB_D2D_SRCSNK) &&
-				battery->vpdo_snk_auth) {
+				(battery->d2d_auth == D2D_AUTH_SNK)) {
 				/* preset auth vpdo for pr swap case (snk to src) */
 				sec_pd_vpdo_auth(AUTH_HIGH_PWR, SB_D2D_SRCSNK);
 			}
@@ -6580,7 +6571,7 @@ static int usb_typec_handle_id_power_status(struct sec_battery_info *battery,
 	battery->pdic_ps_rdy = true;
 #endif
 	if (is_pd_wire_type(battery->cable_type) && bPdIndexChanged) {
-		if (battery->vpdo_snk_auth &&
+		if ((battery->d2d_auth == D2D_AUTH_SNK) &&
 			(battery->sink_status.power_list[current_pdo].pdo_type == FPDO_TYPE)) {
 			/* request vpdo for 15w d2d */
 			sec_vote(battery->iv_vote, VOTER_CABLE, true,
@@ -6618,20 +6609,19 @@ static void sb_auth_detach(struct sec_battery_info *battery)
 {
 	union power_supply_propval value = { 0, };
 
-	battery->vpdo_snk_auth = false;
+	battery->d2d_auth = D2D_AUTH_NONE;
 	battery->vpdo_ocp = false;
-	battery->fpdo_src_auth = false;
 	battery->vpdo_auth_stat = AUTH_NONE;
+	battery->hp_d2d = HP_D2D_NONE;
 	/* clear vpdo auth for snk to src(pr swap) with detach case */
-	sec_pd_vpdo_auth(AUTH_NONE, SB_D2D_NONE);
+	sec_pd_vpdo_auth(AUTH_NONE, battery->pdata->d2d_check_type);
 
 	sb_disable_reverse_boost(battery);
 
-	if (battery->pdata->d2d_check_type == SB_D2D_SNKONLY) {
-		value.intval = 0;
-		psy_do_property(battery->pdata->otg_name, set,
-				POWER_SUPPLY_PROP_VOLTAGE_MAX, value);
-	}
+	/* set otg ocp limit 0.9A */
+	value.intval = 0;
+	psy_do_property(battery->pdata->otg_name, set,
+			POWER_SUPPLY_PROP_VOLTAGE_MAX, value);
 
 	/* clear buck off vote */
 	sec_vote(battery->chgen_vote, VOTER_D2D_WIRE, false, 0);
@@ -6642,31 +6632,32 @@ static int usb_typec_handle_id_device_info(struct sec_battery_info *battery,
 {
 	union power_supply_propval value = { 0, };
 
-	if ((pdata->vendor_id == AUTH_VENDOR_ID) &&
-		(pdata->product_id == AUTH_PRODUCT_ID) &&
-		(pdata->version > 0)) {
-		if (battery->pdata->d2d_check_type == SB_D2D_SRCSNK) {
-			battery->vpdo_src_auth = true;
-#if IS_ENABLED(CONFIG_DIRECT_CHARGING)
-			sec_bat_d2d_check(battery,
-				battery->capacity, battery->temperature, battery->lrp);
-#endif
-		} else if (battery->pdata->d2d_check_type == SB_D2D_SNKONLY) {
-			value.intval = 1;
-			battery->fpdo_src_auth = true;
-			psy_do_property(battery->pdata->otg_name, set,
-				POWER_SUPPLY_PROP_VOLTAGE_MAX, value);
-			/* need to set 7.5w otg */
-			sec_bat_d2d_check(battery,
-				battery->capacity, battery->temperature, battery->lrp);
-			//sec_pd_vpdo_auth(AUTH_FPDO, SB_D2D_SNKONLY);
-			pr_info("%s set 7.5w otg\n", __func__);
-		} else
-			battery->vpdo_snk_auth = true;
+	if ((pdata->vendor_id != AUTH_VENDOR_ID) ||
+		(pdata->product_id != AUTH_PRODUCT_ID) ||
+		(pdata->version <= 0)) {
+		pr_info("%s : skip id_device_info\n", __func__);
+		return -1;
 	}
 
-	pr_info("%s set %s src auth : (0x%04x, 0x%04x, %d)\n", __func__,
-		battery->vpdo_src_auth ? "vpdo" : (battery->fpdo_src_auth ? "fpdo" : "none"),
+	if (battery->pdata->d2d_check_type != SB_D2D_NONE) {
+		if (battery->pdata->d2d_check_type == SB_D2D_SNKONLY) {
+			/* set otg ocp limit 1.5A */
+			value.intval = 1;
+			psy_do_property(battery->pdata->otg_name, set,
+				POWER_SUPPLY_PROP_VOLTAGE_MAX, value);
+		}
+
+		battery->d2d_auth = D2D_AUTH_SRC;
+
+#if IS_ENABLED(CONFIG_DIRECT_CHARGING)
+		sec_bat_d2d_check(battery,
+			battery->capacity, battery->temperature, battery->lrp);
+#endif
+	} else
+		battery->d2d_auth = D2D_AUTH_SNK;
+
+	pr_info("%s set d2d auth %s : (0x%04x, 0x%04x, %d)\n", __func__,
+		((battery->d2d_auth == D2D_AUTH_SRC) ? "src" : "snk"),
 		pdata->vendor_id, pdata->product_id, pdata->version);
 
 	return -1;
@@ -6676,10 +6667,10 @@ static int usb_typec_handle_id_svid_info(struct sec_battery_info *battery,
 	PD_NOTI_SVID_INFO_TYPEDEF *pdata)
 {
 	if (pdata->standard_vendor_id == AUTH_VENDOR_ID)
-		battery->vpdo_snk_auth = true;
+		battery->d2d_auth = D2D_AUTH_SNK;
 
 	pr_info("%s set vpdo snk auth : %s (0x%04x)\n", __func__,
-		battery->vpdo_snk_auth ? "enable" : "disable", pdata->standard_vendor_id);
+		(battery->d2d_auth == D2D_AUTH_SNK) ? "enable" : "disable", pdata->standard_vendor_id);
 
 	return -1;
 }
@@ -6690,7 +6681,6 @@ static int usb_typec_handle_id_clear_info(struct sec_battery_info *battery,
 	if ((pdata->clear_id == PDIC_NOTIFY_ID_DEVICE_INFO) ||
 		(pdata->clear_id == PDIC_NOTIFY_ID_SVID_INFO)) {
 		sb_auth_detach(battery);
-		battery->hp_d2d = HP_D2D_NONE;
 	}
 
 	pr_info("%s clear vpdo auth : (%d)\n", __func__,
@@ -6704,8 +6694,8 @@ static int usb_typec_handle_after_id(struct sec_battery_info *battery, int cable
 #if defined(CONFIG_WIRELESS_TX_MODE)
 	if (!is_hv_wire_type(cable_type) &&
 		!is_hv_pdo_wire_type(cable_type, battery->hv_pdo)) {
-		sec_vote(battery->chgen_vote, VOTER_CHANGE_CHGMODE, false, SEC_BAT_CHG_MODE_UNO_ONLY);
-		sec_vote(battery->iv_vote, VOTER_CHANGE_CHGMODE, false, SEC_INPUT_VOLTAGE_5V);
+		sec_vote(battery->chgen_vote, VOTER_CHANGE_CHGMODE, false, 0);
+		sec_vote(battery->iv_vote, VOTER_CHANGE_CHGMODE, false, 0);
 	}
 #endif
 
@@ -7658,9 +7648,7 @@ static int sec_battery_probe(struct platform_device *pdev)
 	battery->lr_start_time = 0;
 	battery->lr_time_span = 0;
 	battery->usb_slow_chg = false;
-	battery->vpdo_snk_auth = false;
-	battery->vpdo_src_auth = false;
-	battery->fpdo_src_auth = false;
+	battery->d2d_auth = D2D_AUTH_NONE;
 	battery->vpdo_src_boost = false;
 	battery->vpdo_ocp = false;
 	battery->vpdo_auth_stat = AUTH_NONE;

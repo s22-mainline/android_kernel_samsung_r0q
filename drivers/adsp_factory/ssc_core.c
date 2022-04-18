@@ -21,11 +21,7 @@
 #endif
 #include <linux/samsung/bsp/sec_cmdline.h>
 
-#if IS_ENABLED(CONFIG_SUPPORT_SENSOR_FOLD)
-#define REV_SW_OPEN_CLOSE 2
-#endif
-
-#ifdef CONFIG_HALL_NOTIFIER
+#if IS_ENABLED(CONFIG_HALL_NOTIFIER)
 #define SUPPORT_HALL_NOTIFIER
 #endif
 
@@ -81,16 +77,12 @@
 #endif
 #endif
 
-#if defined(CONFIG_TABLET_MODEL_CONCEPT)
-#define DEBUG_SLPI_LOADING_FAILURE
-#endif
-
 static int pid;
 static char panic_msg[SSR_REASON_LEN];
 static char ssr_history[HISTORY_CNT][TIME_LEN + SSR_REASON_LEN];
 static unsigned char ssr_idx = NO_SSR;
-#ifdef DEBUG_SLPI_LOADING_FAILURE
-static char removed_sensors;
+#if IS_ENABLED(CONFIG_SLPI_LOADING_FAILURE_DEBUG)
+static unsigned int removed_sensors;
 #endif
 
 #if IS_ENABLED(CONFIG_SUPPORT_DEVICE_MODE) || IS_ENABLED(CONFIG_SUPPORT_VIRTUAL_OPTIC)
@@ -386,9 +378,9 @@ static ssize_t remove_sensor_sysfs_store(struct device *dev,
 		return size;
 	}
 	pr_info("[FACTORY] %s: type = %u\n", __func__, type);
-#ifdef DEBUG_SLPI_LOADING_FAILURE
+#if IS_ENABLED(CONFIG_SLPI_LOADING_FAILURE_DEBUG)
 	removed_sensors |= (0x1 << type);
-	if (removed_sensors == 0x3f)
+	if ((removed_sensors & 0x3f) == 0x3f)
 		panic("slpi is not loaded, force panic\n");
 #endif
 	mutex_lock(&data->remove_sysfs_mutex);
@@ -592,28 +584,6 @@ void sns_flip_init_work(void)
 		&pdata_ssc_flip->work_ssc_flip);
 }
 
-#if IS_ENABLED(CONFIG_SUPPORT_SENSOR_FOLD)
-int sns_device_mode_fold(struct adsp_data *data, unsigned long flip_state)
-{
-	pr_info("[FACTORY] %s - [before] curr:%d, fstate:%d",
-		__func__, curr_fstate, data->fac_fstate);
-
-	data->fac_fstate = curr_fstate = (int32_t)flip_state;
-	pr_info("[FACTORY] %s - [after] curr:%d, fstate:%d",
-		__func__, curr_fstate, data->fac_fstate);
-
-	if(curr_fstate == 0)
-		adsp_unicast(NULL, 0, MSG_SSC_CORE, 0, MSG_TYPE_FACTORY_ENABLE);
-	else
-		adsp_unicast(NULL, 0, MSG_SSC_CORE, 0, MSG_TYPE_FACTORY_DISABLE);
-
-	// send the flip state by qmi.
-	queue_work(pdata_ssc_flip->ssc_flip_wq, &pdata_ssc_flip->work_ssc_flip);
-
-	return 0;
-}
-#endif //CONFOG_SUPPORT_SENSOR_FOLD
-
 #ifdef SUPPORT_HALL_NOTIFIER
 int sns_device_mode_notify(struct notifier_block *nb,
 	unsigned long flip_state, void *v)
@@ -698,44 +668,6 @@ static ssize_t support_dual_sensor_show(struct device *dev,
 	return snprintf(buf, PAGE_SIZE, "%s\n", SUPPORT_DUAL_SENSOR);
 }
 
-#if IS_ENABLED(CONFIG_SUPPORT_AK09973)
-static ssize_t lcd_onoff_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t size)
-{
-	struct adsp_data *data = dev_get_drvdata(dev);
-	int new_value;
-	uint8_t cnt = 0;
-
-	if (sysfs_streq(buf, "0"))
-		new_value = 0;
-	else if (sysfs_streq(buf, "1"))
-		new_value = 1;
-	else
-		return size;
-
-	pr_info("[FACTORY] %s: new_value %d\n", __func__, new_value);
-
-	if (new_value) {
-		adsp_unicast(NULL, 0, MSG_DIGITAL_HALL_ANGLE, 0, MSG_TYPE_GET_CAL_DATA);
-
-		while (!(data->ready_flag[MSG_TYPE_GET_CAL_DATA] & 1 << MSG_DIGITAL_HALL_ANGLE) &&
-			cnt++ < 3)
-			msleep(30);
-
-		data->ready_flag[MSG_TYPE_GET_CAL_DATA] &= ~(1 << MSG_DIGITAL_HALL_ANGLE);
-
-		if (cnt >= 3) {
-			pr_err("[FACTORY] %s: Timeout!!!\n", __func__);
-			return size;
-		}
-
-		pr_info("[FACTORY] %s: flg_update=%d\n", __func__,
-			data->msg_buf[MSG_DIGITAL_HALL_ANGLE][0]);
-	}
-
-	return size;
-}
-#endif
 static ssize_t algo_lcd_onoff_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
@@ -1148,77 +1080,6 @@ void light_seamless_init_work(struct adsp_data *data)
 }
 #endif
 
-#if IS_ENABLED(CONFIG_SUPPORT_SENSOR_FOLD)
-static BLOCKING_NOTIFIER_HEAD(sensorfold_notifier_list);
-int sensorfold_notifier_register(struct notifier_block *nb)
-{
-	pr_info("[FACTORY] %s\n", __func__);
-	return blocking_notifier_chain_register(&sensorfold_notifier_list, nb);
-}
-EXPORT_SYMBOL(sensorfold_notifier_register);
-
-int sensorfold_notifier_unregister(struct notifier_block *nb)
-{
-	pr_info("[FACTORY] %s\n", __func__);
-	return blocking_notifier_chain_unregister(&sensorfold_notifier_list, nb);
-}
-EXPORT_SYMBOL(sensorfold_notifier_unregister);
-
-int sensorfold_notifier_notify(unsigned long fold_state)
-{
-	return blocking_notifier_call_chain(&sensorfold_notifier_list, fold_state, NULL);
-}
-EXPORT_SYMBOL(sensorfold_notifier_notify);
-
-static ssize_t fold_state_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	struct adsp_data *data = dev_get_drvdata(dev);
-	int flip_status = 0;
-
-	/* notifier open: 0, close: 1 */
-	/* factory app was accessing /sys/class/sec/hall_ic/flip_status */
-	/* and this sysfs return value is opposite. close: 0, open: 1 */
-
-	if (data->fold_state.state == 0)
-		flip_status = 1;
-	else if (data->fold_state.state == 1)
-		flip_status = 0;
-
-	pr_info("[FACTORY] %s: ts:%lld, %d, %d(flip_status)\n", __func__,
-		data->fold_state.ts, data->fold_state.state, flip_status);
-
-	/* For Factory App */
-	return snprintf(buf, PAGE_SIZE,	"%d\n", flip_status);
-}
-
-static ssize_t fold_state_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t size)
-{
-	struct adsp_data *data = dev_get_drvdata(dev);
-	struct timespec ts;
-	int ret = 0;
-
-	pr_info("[FACTORY] %s:  %s\n", __func__, buf);
-	if (sysfs_streq(buf, "0")) // fold
-		data->fold_state.state = 1;
-	else if (sysfs_streq(buf, "1")) //unfold
-		data->fold_state.state = 0;
-	else
-		return size;
-	
-	ret = sensorfold_notifier_notify(data->fold_state.state);
-	ts = ktime_to_timespec(ktime_get_boottime());
-	data->fold_state.ts = ts.tv_sec * 1000000000ULL + ts.tv_nsec;
-
-#if IS_ENABLED(CONFIG_SUPPORT_DEVICE_MODE)
-	sns_device_mode_fold(data, data->fold_state.state);
-#endif
-	pr_info("[FACTORY] %s: %d, ret: %x\n", __func__, data->fold_state.state, ret);
-	return size;
-}
-#endif
-
 static ssize_t ar_mode_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
@@ -1258,17 +1119,10 @@ static DEVICE_ATTR(ssc_firmware_info, 0660,
 #ifdef CONFIG_SUPPORT_SSC_MODE
 static DEVICE_ATTR(ssc_mode, 0664, ssc_mode_show, ssc_mode_store);
 #endif
-#if IS_ENABLED(CONFIG_SUPPORT_AK09973)
-static DEVICE_ATTR(lcd_onoff, 0220, NULL, lcd_onoff_store);
-#endif
 #if IS_ENABLED(CONFIG_SUPPORT_LIGHT_SEAMLESS)
 static DEVICE_ATTR(light_seamless, 0660,
 	light_seamless_show, light_seamless_store);
 #endif
-#if IS_ENABLED(CONFIG_SUPPORT_SENSOR_FOLD)
-static DEVICE_ATTR(fold_state, 0660, fold_state_show, fold_state_store);
-#endif
-
 static DEVICE_ATTR(ar_mode, 0220, NULL, ar_mode_store);
 
 static struct device_attribute *core_attrs[] = {
@@ -1296,14 +1150,8 @@ static struct device_attribute *core_attrs[] = {
 #ifdef CONFIG_SUPPORT_SSC_MODE
 	&dev_attr_ssc_mode,
 #endif
-#if IS_ENABLED(CONFIG_SUPPORT_AK09973)
-	&dev_attr_lcd_onoff,
-#endif
 #if IS_ENABLED(CONFIG_SUPPORT_LIGHT_SEAMLESS)
 	&dev_attr_light_seamless,
-#endif
-#if IS_ENABLED(CONFIG_SUPPORT_SENSOR_FOLD)
-	&dev_attr_fold_state,
 #endif
 	&dev_attr_ar_mode,
 	NULL,
@@ -1373,17 +1221,9 @@ int __init core_factory_init(void)
 	sec_hw_rev_setup();
 #if IS_ENABLED(CONFIG_SUPPORT_DEVICE_MODE)
 #ifdef SUPPORT_HALL_NOTIFIER
-#if IS_ENABLED(CONFIG_SUPPORT_SENSOR_FOLD)
-	if (sec_hw_rev() > REV_SW_OPEN_CLOSE) {
-		data->adsp_nb.notifier_call = sns_device_mode_notify,
-		data->adsp_nb.priority = 1,
-		hall_notifier_register(&data->adsp_nb);
-	}
-#else
 	data->adsp_nb.notifier_call = sns_device_mode_notify,
 	data->adsp_nb.priority = 1,
 	hall_notifier_register(&data->adsp_nb);
-#endif
 #endif //SUPPORT_HALL_NOTIFIER
 #endif
 #ifdef CONFIG_VBUS_NOTIFIER
@@ -1440,7 +1280,7 @@ int __init core_factory_init(void)
 	}
 	INIT_WORK(&pdata_ssc_charge->work_ssc_charge, ssc_charge_work_func);
 	pdata_ssc_charge->is_charging = false;
-#endif	
+#endif
 	pr_info("[FACTORY] %s\n", __func__);
 
 	return 0;
@@ -1452,12 +1292,7 @@ void __exit core_factory_exit(void)
 	struct adsp_data *data = adsp_ssc_core_unregister(MSG_SSC_CORE);;
 #if IS_ENABLED(CONFIG_SUPPORT_DEVICE_MODE)
 #ifdef SUPPORT_HALL_NOTIFIER
-#if IS_ENABLED(CONFIG_SUPPORT_SENSOR_FOLD)
-	if (sec_hw_rev() > REV_SW_OPEN_CLOSE)
-		hall_notifier_unregister(&data->adsp_nb);
-#else
 	hall_notifier_unregister(&data->adsp_nb);
-#endif
 #endif //SUPPORT_HALL_NOTIFIER
 #endif
 #ifdef CONFIG_VBUS_NOTIFIER

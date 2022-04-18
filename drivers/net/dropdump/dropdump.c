@@ -5,9 +5,11 @@
  */
 
 #include <net/ip.h>
+#include <net/tcp.h>
 #if defined(CONFIG_ANDROID_VENDOR_HOOKS)
 #include <trace/hooks/net.h>
 #endif
+#include <trace/events/skb.h>
 
 int debug_drd = 0;
 module_param(debug_drd, int, S_IRUGO | S_IWUSR | S_IWGRP);
@@ -52,13 +54,15 @@ static char save_stack[NR_CPUS][ST_SIZE * ST_MAX];
 
 char *__stack(int depth) {
 	char *func = NULL;
-	switch (depth + 4) {
+	switch (depth + 6) {
+#if 0
 		case  4 :
 			func = __builtin_return_address(4);
 			break;
 		case  5 :
 			func = __builtin_return_address(5);
 			break;
+#endif
 		case  6 :
 			func = __builtin_return_address(6);
 			break;
@@ -124,51 +128,100 @@ char *__stack(int depth) {
 }
 
 
+#define NOT_TRACE	(-1)
+#define FIN_TRACE	1
+#define ACK_TRACE	2
+#define GET_TRACE	3
+
 int chk_stack(char *pos, int net_pkt)
 {
 	/* stop tracing */
 	if (!strncmp(pos, "unix", 4))	 // unix_xxx
-		return -1;
+		return NOT_TRACE;
 	if (!strncmp(pos + 2, "tlin", 4))// netlink_xxx
-		return -1;
+		return NOT_TRACE;
 	if (!strncmp(pos, "tpac", 4))	 // tpacket_rcv
-		return -1;
+		return NOT_TRACE;
 	if (!strncmp(pos, "drd", 3))	 // drd_xxx
-		return -1;
+		return NOT_TRACE;
 	if (!strncmp(pos + 2, "sk_d", 4))// __sk_destruct
-		return -1;
+		return NOT_TRACE;
 
 	/* end of callstack */
 	if (!strncmp(pos + 7, "_bh_", 4))// __local_bh_xxx
-		return 1;
+		return FIN_TRACE;
 	if (!strncmp(pos + 7, "ftir", 4))// __do_softirq
-		return 1;
+		return FIN_TRACE;
 	if (!strncmp(pos + 7, "rk_r", 4))// task_work_run
-		return 1;
+		return FIN_TRACE;
 	if (!strncmp(pos, "SyS", 3))	 // SyS_xxx
-		return 1;
+		return FIN_TRACE;
 	if (!strncmp(pos, "ret_", 4))	 // ret_from_xxx
-		return 1;
+		return FIN_TRACE;
 	if (!strncmp(pos, "el0", 3))	 // el0_irq
-		return 1;
+		return FIN_TRACE;
 	if (!strncmp(pos, "el1", 3))	 // el1_irq
-		return 1;
+		return FIN_TRACE;
 	if (!strncmp(pos, "gic", 3))	 // gic_xxx
-		return 1;
+		return FIN_TRACE;
 
 	/* network pkt */
 	if (!net_pkt) {
 		if (!strncmp(pos, "net", 3))
-			return 2;
-		if (!strncmp(pos, "tcp", 3))
-			return 2;
+			return GET_TRACE;
+		if (!strncmp(pos, "tcp", 3)) {
+			// packet from tcp_drop() could be normal operation.
+			// don't logging pure ack.
+			if (!strncmp(pos, "tcp_drop", 8))
+				return ACK_TRACE;
+			return GET_TRACE;
+		}
 		if (!strncmp(pos, "ip",  2))
-			return 2;
+			return GET_TRACE;
 		if (!strncmp(pos, "xfr", 3))
-			return 2;
+			return GET_TRACE;
 	}
 
 	return 0;
+}
+
+
+static bool _is_tcp_ack(struct sk_buff *skb)
+{
+	switch (skb->protocol) {
+	/* TCPv4 ACKs */
+	case htons(ETH_P_IP):
+		if ((ip_hdr(skb)->protocol == IPPROTO_TCP) &&
+			(ntohs(ip_hdr(skb)->tot_len) - (ip_hdr(skb)->ihl << 2) ==
+			 tcp_hdr(skb)->doff << 2) &&
+		    ((tcp_flag_word(tcp_hdr(skb)) &
+		      cpu_to_be32(0x00FF0000)) == TCP_FLAG_ACK))
+			return true;
+		break;
+
+	/* TCPv6 ACKs */
+	case htons(ETH_P_IPV6):
+		if ((ipv6_hdr(skb)->nexthdr == IPPROTO_TCP) &&
+			(ntohs(ipv6_hdr(skb)->payload_len) ==
+			 (tcp_hdr(skb)->doff) << 2) &&
+		    ((tcp_flag_word(tcp_hdr(skb)) &
+		      cpu_to_be32(0x00FF0000)) == TCP_FLAG_ACK))
+			return true;
+		break;
+	}
+
+	return false;
+}
+
+static inline bool is_tcp_ack(struct sk_buff *skb)
+{
+	if (skb_is_tcp_pure_ack(skb))
+		return true;
+
+	if (unlikely(_is_tcp_ack(skb)))
+		return true;
+
+	return false;
 }
 
 int pr_stack(struct sk_buff *skb, char *dst)
@@ -180,16 +233,27 @@ int pr_stack(struct sk_buff *skb, char *dst)
 		st = __stack(depth);
 		if (st) {
 			pos = (char *)(dst + ST_SIZE * depth);
-			n = snprintf(pos, ST_SIZE, "%pF", st);
+			n = snprintf(pos, ST_SIZE, "%pS", st);
 			memset(pos + n, 0, ST_SIZE - n);
 
 			chk = chk_stack(pos, net_pkt);
 			drd_dbg("[%2d:%d] <%s>\n", depth, chk, pos);
 			if (chk < 0)
-				return -1;
-			if (chk == 1) 
+				return NOT_TRACE;
+
+			if (chk == FIN_TRACE) 
 				break;
-			if (chk == 2)
+
+			if (chk == ACK_TRACE) {
+				if (is_tcp_ack(skb)) {
+					drd_dbg("don't trace tcp ack\n");
+					return NOT_TRACE;
+				}
+				else
+					net_pkt = 1;
+			}
+
+			if (chk == GET_TRACE)
 				net_pkt = 1;
 		} else {
 			/* end of callstack */
@@ -273,13 +337,13 @@ static void drd_print_skb(struct sk_buff *skb, unsigned int len)
 	struct iphdr *ip4hdr = (struct iphdr *)skb_network_header(skb);
 
 	if (ip4hdr->version == 4) {
-		drd_limit("<%pF><%pF> src:%pI4 | dst:%pI4 | %*ph\n",
-			__builtin_return_address(3), __builtin_return_address(4),
+		drd_limit("<%pS><%pS> src:%pI4 | dst:%pI4 | %*ph\n",
+			__builtin_return_address(4), __builtin_return_address(5),
 			&ip4hdr->saddr, &ip4hdr->daddr, len < 48 ? len : 48, ip4hdr);
 	} else {
 		struct ipv6hdr *ip6hdr = (struct ipv6hdr *)ip4hdr;
-		drd_limit("<%pF><%pF> src:%pI6c | dst:%pI6c | %*ph\n",
-			__builtin_return_address(3), __builtin_return_address(4),
+		drd_limit("<%pS><%pS> src:%pI6c | dst:%pI6c | %*ph\n",
+			__builtin_return_address(4), __builtin_return_address(5),
 			&ip6hdr->saddr, &ip6hdr->daddr, len < 48 ? len : 48, ip4hdr);
 	}
 }
@@ -436,11 +500,6 @@ static void drd_ptype_head_handler(void *data, const struct packet_type *pt, str
 {
 	drd_ptype_head(pt, vendor_pt);
 }
-
-static void drd_kfree_skb_handler(void *data, struct sk_buff *skb)
-{
-	drd_kfree_skb(skb);
-}
 #else
 /* can't use macro directing the drd_xxx functions instead of lapper. *
  * because of have to use EXPORT_SYMBOL macro for module parts.       *
@@ -450,13 +509,12 @@ void trace_android_vh_ptype_head(const struct packet_type *pt, struct list_head 
 	drd_ptype_head(pt, vendor_pt);
 }
 EXPORT_SYMBOL_GPL(trace_android_vh_ptype_head);
+#endif
 
-void trace_android_vh_kfree_skb(struct sk_buff *skb)
+static void drd_kfree_skb_handler(void *data, struct sk_buff *skb, void *location)
 {
 	drd_kfree_skb(skb);
 }
-EXPORT_SYMBOL_GPL(trace_android_vh_kfree_skb);
-#endif
 
 static struct ctl_table drd_proc_table[] = {
 	{
@@ -485,12 +543,12 @@ static int __init init_net_drop_dump(void)
 
 #if defined(CONFIG_ANDROID_VENDOR_HOOKS)
 	rc  = register_trace_android_vh_ptype_head(drd_ptype_head_handler, NULL);
-	rc += register_trace_android_vh_kfree_skb(drd_kfree_skb_handler, NULL);
+#endif
+	rc += register_trace_kfree_skb(drd_kfree_skb_handler, NULL);
 	if (rc) {
 		drd_info("fail to register android_trace\n");
 		return -EIO;
 	}
-#endif
 
 	support_dropdump = 0;
 

@@ -577,8 +577,7 @@ int stm_ts_write_to_sponge(struct stm_ts_data *ts, u8 *data, int length)
 	return ret;
 }
 
-
-int stm_ts_spi_write(struct stm_ts_data *ts, u8 *reg, int tlen, u8 *data, int len)
+int stm_ts_no_lock_spi_write(struct stm_ts_data *ts, u8 *reg, int tlen, u8 *data, int len)
 {
 	struct spi_message *m;
 	struct spi_transfer *t;
@@ -586,35 +585,6 @@ int stm_ts_spi_write(struct stm_ts_data *ts, u8 *reg, int tlen, u8 *data, int le
 	int ret = -ENOMEM;
 	int wlen;
 
-	if (ts->plat_data->power_state == SEC_INPUT_STATE_POWER_OFF) {
-		input_err(true, &ts->client->dev, "%s: Sensor stopped\n", __func__);
-		return -EIO;
-	}
-
-	if (!ts->plat_data->resume_done.done) {
-		ret = wait_for_completion_interruptible_timeout(&ts->plat_data->resume_done, msecs_to_jiffies(500));
-		if (ret <= 0) {
-			input_err(true, &ts->client->dev, "%s: LPM: pm resume is not handled:%d\n", __func__, ret);
-			return -EIO;
-		}
-	}
-
-#if IS_ENABLED(CONFIG_SAMSUNG_TUI)
-	if (STUI_MODE_TOUCH_SEC & stui_get_mode())
-		return -EBUSY;
-#endif
-#if IS_ENABLED(CONFIG_INPUT_SEC_SECURE_TOUCH)
-	if (atomic_read(&ts->secure_enabled) == SECURE_TOUCH_ENABLE) {
-		input_err(true, &ts->client->dev, "%s: TUI is enabled\n", __func__);
-		return -EBUSY;
-	}
-#if IS_ENABLED(CONFIG_GH_RM_DRV)
-	if (atomic_read(&ts->trusted_touch_enabled) != 0) {
-		input_err(true, &ts->client->dev, "%s: TVM is enabled\n", __func__);
-		return -EBUSY;
-	}
-#endif
-#endif
 	m = kzalloc(sizeof(struct spi_message), GFP_KERNEL);
 	if (!m)
 		return -ENOMEM;
@@ -631,8 +601,6 @@ int stm_ts_spi_write(struct stm_ts_data *ts, u8 *reg, int tlen, u8 *data, int le
 		kfree(t);
 		return -ENOMEM;
 	}
-
-	mutex_lock(&ts->read_write_mutex);
 
 	switch (reg[0]) {
 	case STM_TS_CMD_SCAN_MODE:
@@ -670,8 +638,6 @@ int stm_ts_spi_write(struct stm_ts_data *ts, u8 *reg, int tlen, u8 *data, int le
 	if (ts->plat_data->gpio_spi_cs > 0)
 		gpio_direction_output(ts->plat_data->gpio_spi_cs, 1);
 
-	mutex_unlock(&ts->read_write_mutex);
-
 	if (ts->debug_flag & SEC_TS_DEBUG_PRINT_WRITE_CMD) {
 		int i;
 
@@ -685,6 +651,46 @@ int stm_ts_spi_write(struct stm_ts_data *ts, u8 *reg, int tlen, u8 *data, int le
 	kfree(tbuf);
 	kfree(m);
 	kfree(t);
+
+	return ret;
+}
+
+int stm_ts_spi_write(struct stm_ts_data *ts, u8 *reg, int tlen, u8 *data, int len)
+{
+	int ret = -ENOMEM;
+
+	if (ts->plat_data->power_state == SEC_INPUT_STATE_POWER_OFF) {
+		input_err(true, &ts->client->dev, "%s: Sensor stopped\n", __func__);
+		return -EIO;
+	}
+
+	if (!ts->plat_data->resume_done.done) {
+		ret = wait_for_completion_interruptible_timeout(&ts->plat_data->resume_done, msecs_to_jiffies(500));
+		if (ret <= 0) {
+			input_err(true, &ts->client->dev, "%s: LPM: pm resume is not handled:%d\n", __func__, ret);
+			return -EIO;
+		}
+	}
+
+#if IS_ENABLED(CONFIG_SAMSUNG_TUI)
+	if (STUI_MODE_TOUCH_SEC & stui_get_mode())
+		return -EBUSY;
+#endif
+#if IS_ENABLED(CONFIG_INPUT_SEC_SECURE_TOUCH)
+	if (atomic_read(&ts->secure_enabled) == SECURE_TOUCH_ENABLE) {
+		input_err(true, &ts->client->dev, "%s: TUI is enabled\n", __func__);
+		return -EBUSY;
+	}
+#if IS_ENABLED(CONFIG_GH_RM_DRV)
+	if (atomic_read(&ts->trusted_touch_enabled) != 0) {
+		input_err(true, &ts->client->dev, "%s: TVM is enabled\n", __func__);
+		return -EBUSY;
+	}
+#endif
+#endif
+	mutex_lock(&ts->read_write_mutex);
+	ret = stm_ts_no_lock_spi_write(ts, reg, tlen, data, len);
+	mutex_unlock(&ts->read_write_mutex);
 
 	return ret;
 }
@@ -757,6 +763,8 @@ int stm_ts_spi_read(struct stm_ts_data *ts, u8 *reg, int tlen, u8 *buf, int rlen
 		return -ENOMEM;
 	}
 
+	mutex_lock(&ts->read_write_mutex);
+
 	switch (reg[0]) {
 	case 0x87:
 	case STM_TS_CMD_FRM_BUFF_R:
@@ -784,6 +792,7 @@ int stm_ts_spi_read(struct stm_ts_data *ts, u8 *reg, int tlen, u8 *buf, int rlen
 			kfree(t);
 			kfree(tbuf);
 			kfree(rbuf);
+			mutex_unlock(&ts->read_write_mutex);
 			return -EINVAL;
 		}
 
@@ -808,6 +817,7 @@ int stm_ts_spi_read(struct stm_ts_data *ts, u8 *reg, int tlen, u8 *buf, int rlen
 			kfree(t);
 			kfree(tbuf);
 			kfree(rbuf);
+			mutex_unlock(&ts->read_write_mutex);
 			return -EINVAL;
 		}
 
@@ -816,9 +826,7 @@ int stm_ts_spi_read(struct stm_ts_data *ts, u8 *reg, int tlen, u8 *buf, int rlen
 	}
 
 	if (wmsg)
-		stm_ts_spi_write(ts, reg, 1, NULL, 0);
-
-	mutex_lock(&ts->read_write_mutex);
+		stm_ts_no_lock_spi_write(ts, reg, 1, NULL, 0);
 
 	spi_message_init(m);
 
